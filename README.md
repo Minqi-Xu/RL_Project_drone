@@ -8,9 +8,11 @@ Upstream environment repository: [utiasDSL/gym-pybullet-drones](https://github.c
 
 The project follows a staged approach:
 
-1. Train a baseline agent to hover at a fixed position.
-2. Extend the control problem to takeoff and landing.
+1. Train a baseline agent to reach and maintain a stable hover at a fixed target position.
+2. Extend the control problem to safe landing from hover.
 3. Explore point-to-point navigation as a separate RL agent.
+
+In this project, the hovering task includes takeoff. The drone starts from the ground or a low-altitude initial state, rises to the target hover position, and then learns to remain stable around that point.
 
 ## Repository Structure
 
@@ -23,7 +25,7 @@ The project follows a staged approach:
 
 ## Immediate Goal
 
-The first milestone is to train and evaluate a PPO agent that can maintain stable hover near a target position in simulation.
+The first milestone is to train and evaluate a PPO agent that can take off and maintain stable hover near a target position in simulation.
 
 ## Dependencies
 
