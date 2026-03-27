@@ -2,6 +2,8 @@
 
 Reinforcement learning project for quadcopter control in PyBullet using `gym-pybullet-drones` as the simulation environment.
 
+Upstream environment repository: [utiasDSL/gym-pybullet-drones](https://github.com/utiasDSL/gym-pybullet-drones)
+
 ## Project Scope
 
 The project follows a staged approach:
