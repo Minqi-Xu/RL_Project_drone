@@ -30,7 +30,7 @@ class HoverPPOConfig:
     seed: int = 0
     num_envs: int = 1
     total_timesteps: int = 1e7
-    eval_freq: int = 1000
+    eval_freq: int = 2000
     n_eval_episodes: int = 10
     reward_threshold: float = 474.0
     verbose: int = 1
