@@ -16,12 +16,17 @@ In this project, the hovering task includes takeoff. The drone starts from the g
 
 ## Repository Structure
 
-- `src/drone_rl/`: shared project code for hover training and evaluation
-- `train/`: training entrypoints
-- `eval/`: evaluation entrypoints
-- `configs/`: experiment and hyperparameter configuration files
-- `models/`: saved model checkpoints
-- `results/`: plots, logs, and generated artifacts
+```text
+Project/
+├── RL_Project_drone/
+│   ├── configs/         # experiment and hyperparameter configuration files
+│   ├── eval/            # evaluation entrypoints
+│   ├── models/          # saved model checkpoints
+│   ├── results/         # plots, logs, and generated artifacts
+│   ├── src/drone_rl/    # shared project code for training and evaluation
+│   └── train/           # training entrypoints
+└── gym-pybullet-drones/ # sibling upstream repository (set up separately)
+```
 
 ## Immediate Goal
 
@@ -39,9 +44,19 @@ Training outputs are written to timestamped folders under `results/`.
 
 ## How To Run
 
-Train the hover baseline:
+### Prerequisite: set up `utiasDSL/gym-pybullet-drones` first
 
-```powershell
+All training in this repository depends on the upstream `gym-pybullet-drones` package.
+You must run training only from the same activated virtual environment (`venv`) where `gym-pybullet-drones` is installed.
+
+For environment setup details, follow the upstream README:
+[utiasDSL/gym-pybullet-drones](https://github.com/utiasDSL/gym-pybullet-drones)
+
+### Train
+
+From `RL_Project_drone/`, while that same `.venv` is activated:
+
+```bash
 python train/train_hover_ppo.py
 ```
 
@@ -57,7 +72,7 @@ Training arguments:
 
 Evaluate a saved model:
 
-```powershell
+```bash
 python eval/eval_hover_ppo.py --model-path results/<run-folder>/best_model.zip
 ```
 
@@ -77,6 +92,7 @@ Without `--gui`, evaluation runs only the fast multi-episode metric check. With 
 - `gym-pybullet-drones`
 - `stable-baselines3`
 - `gymnasium`
+- TensorBoard (required by the current training logger setup)
 
 ## Version Control
 
