@@ -22,7 +22,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reward-threshold", type=float, default=474.0, help="Early-stop reward threshold.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed for training.")
     parser.add_argument("--show-performance", action="store_true", help="Render a post-training rollout.")
-    parser.add_argument("--record-video", action="store_true", help="Record the post-training rollout if supported.")
     parser.add_argument("--plot", action="store_true", help="Plot the logged rollout state after playback.")
     return parser.parse_args()
 
@@ -49,7 +48,6 @@ def main() -> None:
             config=config,
             output_folder=run_dir,
             gui=True,
-            record_video=args.record_video,
             plot=args.plot,
         )
 

@@ -71,11 +71,11 @@ def make_train_env(config: HoverPPOConfig):
     )
 
 
-def make_eval_env(config: HoverPPOConfig, gui: bool = False, record: bool = False):
-    # Evaluation uses a plain HoverAviary instance so we can optionally render or record rollouts.
+def make_eval_env(config: HoverPPOConfig, gui: bool = False):
+    # Evaluation uses a plain HoverAviary instance so we can optionally render rollouts.
     return HoverAviary(
         gui=gui,
-        record=record,
+        record=False,
         obs=get_obs_type(config),
         act=get_action_type(config),
     )
@@ -163,7 +163,7 @@ def evaluate_saved_model(
     n_eval_episodes: int | None = None,
 ) -> tuple[float, float]:
     # Keep metric evaluation fast and non-interactive; GUI playback is handled separately.
-    eval_env = make_eval_env(config, gui=False, record=False)
+    eval_env = make_eval_env(config, gui=False)
     model = PPO.load(str(model_path))
     mean_reward, std_reward = evaluate_policy(
         model,
@@ -179,14 +179,13 @@ def show_model_performance(
     config: HoverPPOConfig,
     output_folder: Path,
     gui: bool = True,
-    record_video: bool = False,
     plot: bool = True,
 ) -> tuple[float, float]:
-    """Run a rendered rollout similar to the upstream example and optionally record it."""
+    """Run a rendered rollout similar to the upstream example."""
 
     model = PPO.load(str(model_path))
-    test_env = make_eval_env(config, gui=gui, record=record_video)
-    test_env_nogui = make_eval_env(config, gui=False, record=False)
+    test_env = make_eval_env(config, gui=gui)
+    test_env_nogui = make_eval_env(config, gui=False)
     logger = Logger(
         logging_freq_hz=int(test_env.CTRL_FREQ),
         num_drones=1,

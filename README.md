@@ -67,7 +67,6 @@ Training arguments:
 - `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `474.0`
 - `--seed`: random seed for reproducible training runs. Default: `0`
 - `--show-performance`: after training, open one real-time GUI rollout of the learned policy. Default: off
-- `--record-video`: when used with `--show-performance`, save a video of the rendered rollout if supported by the environment. Default: off
 - `--plot`: when used with `--show-performance`, display the logged state plots after the rollout finishes. Default: off
 
 Evaluate a saved model:
@@ -81,7 +80,6 @@ Evaluation arguments:
 - `--model-path`: path to the saved PPO model file, usually `best_model.zip` or `final_model.zip`. Required.
 - `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `10`
 - `--gui`: after the fast evaluation, run one normal-speed PyBullet rollout and show the plots. Default: off
-- `--record-video`: when used with `--gui`, record the rendered rollout if supported. Default: off
 
 Without `--gui`, evaluation runs only the fast multi-episode metric check. With `--gui`, the script first runs the fast evaluation and then shows one normal-speed rollout with plots. If `best_model.zip` is not available, you can also evaluate `final_model.zip`.
 

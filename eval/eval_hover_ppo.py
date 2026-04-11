@@ -20,7 +20,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=Path, required=True, help="Path to the saved .zip PPO model.")
     parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes.")
     parser.add_argument("--gui", action="store_true", help="After fast evaluation, run one real-time GUI rollout and show plots.")
-    parser.add_argument("--record-video", action="store_true", help="Record evaluation video if supported.")
     return parser.parse_args()
 
 
@@ -44,7 +43,6 @@ def main() -> None:
             config=config,
             output_folder=output_folder,
             gui=True,
-            record_video=args.record_video,
             plot=True,
         )
 
