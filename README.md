@@ -83,6 +83,26 @@ Evaluation arguments:
 
 Without `--gui`, evaluation runs only the fast multi-episode metric check. With `--gui`, the script first runs the fast evaluation and then shows one normal-speed rollout with plots. If `best_model.zip` is not available, you can also evaluate `final_model.zip`.
 
+### Plot Evaluation Reward vs Training Steps
+
+Use the standalone plotting script to read `evaluations.npz` and save a reward curve image in the same run folder.
+
+```bash
+python eval/plot_eval_rewards.py --input results/<run-folder>
+```
+
+You can also point directly to the file:
+
+```bash
+python eval/plot_eval_rewards.py --input results/<run-folder>/evaluations.npz
+```
+
+Plot arguments:
+
+- `--input`: path to either a run directory containing `evaluations.npz` or the `evaluations.npz` file itself. Required.
+- `--output-name`: output image filename saved beside `evaluations.npz`. Default: `evaluation_reward_vs_training_steps.png`
+- `--max-points`: maximum plotted points after automatic downsampling based on total training timestep span. Default: `200`
+
 ## Dependencies
 
 - Python
@@ -90,6 +110,7 @@ Without `--gui`, evaluation runs only the fast multi-episode metric check. With 
 - `gym-pybullet-drones`
 - `stable-baselines3`
 - `gymnasium`
+- `matplotlib` (required for `eval/plot_eval_rewards.py`)
 - TensorBoard (required by the current training logger setup)
 
 ## Version Control
