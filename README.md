@@ -47,14 +47,14 @@ Training outputs are written to timestamped folders under `results/`.
 ### Prerequisite: set up `utiasDSL/gym-pybullet-drones` first
 
 All training in this repository depends on the upstream `gym-pybullet-drones` package.
-You must run training only from the same activated virtual environment (`venv`) where `gym-pybullet-drones` is installed.
+You must run training only from the same activated conda environment (`drones`) where `gym-pybullet-drones` is installed.
 
 For environment setup details, follow the upstream README:
 [utiasDSL/gym-pybullet-drones](https://github.com/utiasDSL/gym-pybullet-drones)
 
 ### Train
 
-From `RL_Project_drone/`, while that same `.venv` is activated:
+From `RL_Project_drone/`, while that same conda environment is activated (`conda activate drones`):
 
 ```bash
 python train/train_hover_ppo.py
