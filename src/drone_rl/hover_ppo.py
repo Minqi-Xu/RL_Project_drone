@@ -13,7 +13,7 @@ from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewar
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
 
-from gym_pybullet_drones.envs.HoverAviary import HoverAviary
+from drone_rl.custom_envs.project_hover_aviary import ProjectHoverAviary
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.enums import ActionType, ObservationType
 from gym_pybullet_drones.utils.utils import sync
@@ -64,7 +64,7 @@ def get_action_type(config: HoverPPOConfig) -> ActionType:
 def make_train_env(config: HoverPPOConfig):
     # Vectorized env creation matches Stable-Baselines3's expected training interface.
     return make_vec_env(
-        HoverAviary,
+        ProjectHoverAviary,
         env_kwargs={"obs": get_obs_type(config), "act": get_action_type(config)},
         n_envs=config.num_envs,
         seed=config.seed,
@@ -72,8 +72,8 @@ def make_train_env(config: HoverPPOConfig):
 
 
 def make_eval_env(config: HoverPPOConfig, gui: bool = False):
-    # Evaluation uses a plain HoverAviary instance so we can optionally render rollouts.
-    return HoverAviary(
+    # Evaluation uses a plain ProjectHoverAviary instance so we can optionally render rollouts.
+    return ProjectHoverAviary(
         gui=gui,
         record=False,
         obs=get_obs_type(config),
