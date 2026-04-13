@@ -77,6 +77,28 @@ def downsample_by_timestep_span(
     return timesteps[indices], mean_rewards[indices], std_rewards[indices]
 
 
+def clip_to_end_timestep(
+    timesteps: np.ndarray,
+    mean_rewards: np.ndarray,
+    std_rewards: np.ndarray,
+    end_timestep: int | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Keep data up to end_timestep (inclusive), using the latest available record before it."""
+    if end_timestep is None:
+        return timesteps, mean_rewards, std_rewards
+
+    if end_timestep < int(timesteps[0]):
+        raise ValueError(
+            f"--end-timestep ({end_timestep}) is smaller than first logged timestep ({int(timesteps[0])})."
+        )
+
+    last_idx = np.searchsorted(timesteps, end_timestep, side="right") - 1
+    if last_idx < 0:
+        raise ValueError("No data points are available at or before the requested end timestep.")
+
+    return timesteps[: last_idx + 1], mean_rewards[: last_idx + 1], std_rewards[: last_idx + 1]
+
+
 def plot_rewards(
     timesteps: np.ndarray,
     mean_rewards: np.ndarray,
@@ -135,6 +157,12 @@ def parse_args() -> argparse.Namespace:
         default=200,
         help="Maximum plotted points after automatic downsampling. Default: 200",
     )
+    parser.add_argument(
+        "--end-timestep",
+        type=int,
+        default=None,
+        help="Optional cutoff timestep n; plot uses data from start up to n (or latest point before n).",
+    )
     return parser.parse_args()
 
 
@@ -142,6 +170,12 @@ def main() -> None:
     args = parse_args()
     npz_path = resolve_npz_path(args.input)
     timesteps, mean_rewards, std_rewards = load_eval_data(npz_path)
+    timesteps, mean_rewards, std_rewards = clip_to_end_timestep(
+        timesteps,
+        mean_rewards,
+        std_rewards,
+        end_timestep=args.end_timestep,
+    )
     timesteps, mean_rewards, std_rewards = downsample_by_timestep_span(
         timesteps,
         mean_rewards,
