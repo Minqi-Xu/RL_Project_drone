@@ -98,6 +98,12 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.TERMINAL_LANDING_BONUS = 300.0
         # Keep an explicit crash penalty for safety during exploration.
         self.CRASH_PENALTY = 10000.0
+        # Penalize non-crash truncation reasons to discourage stalling or drifting away.
+        self.OUT_OF_BOUNDS_PENALTY = 10000.0
+        self.TIMEOUT_PENALTY = 10000.0
+        # Larger XY workspace for landing training.
+        self.XY_BOUND_M = 5.0
+        self.Z_UPPER_BOUND_M = 2.2
         # Differential shaping requires the previous shaping value from the prior step.
         self.previous_shaping = 0.0
 
@@ -215,6 +221,12 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         if self._is_successful_landing(state):
             reward += self.TERMINAL_LANDING_BONUS
 
+        if self._is_out_of_bounds(state):
+            reward -= self.OUT_OF_BOUNDS_PENALTY
+
+        if self._is_timeout():
+            reward -= self.TIMEOUT_PENALTY
+
         if self._is_crash_condition(state):
             reward -= self.CRASH_PENALTY
 
@@ -229,8 +241,8 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         """Truncates on unsafe flight or time limit."""
         state = self._getDroneStateVector(0)
 
-        out_of_bounds = abs(state[0]) > 1.5 or abs(state[1]) > 1.5 or state[2] > 2.2
-        timeout = self.step_counter / self.PYB_FREQ > self.EPISODE_LEN_SEC
+        out_of_bounds = self._is_out_of_bounds(state)
+        timeout = self._is_timeout()
 
         return out_of_bounds or self._is_crash_condition(state) or timeout
 
@@ -240,15 +252,13 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
 
     def _is_successful_landing(self, state: np.ndarray) -> bool:
         """Checks if the drone satisfies stable touchdown criteria."""
-        xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
         altitude = state[2]
         linear_speed = np.linalg.norm(state[10:13])
         angular_speed = np.linalg.norm(state[13:16])
         tilt_norm = np.linalg.norm(state[7:9])
 
         return (
-            xy_error < self.SUCCESS_XY_ERR_M
-            and altitude < self.SUCCESS_ALTITUDE_M
+            altitude < self.SUCCESS_ALTITUDE_M
             and linear_speed < self.SUCCESS_SPEED_MPS
             and angular_speed < self.SUCCESS_ANG_SPEED_RADPS
             and tilt_norm < self.SUCCESS_TILT_RAD
@@ -260,6 +270,18 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         too_fast = np.linalg.norm(state[10:13]) > 3.0 or np.linalg.norm(state[13:16]) > 8.0
         below_floor = state[2] < -0.05
         return over_tilted or too_fast or below_floor
+
+    def _is_out_of_bounds(self, state: np.ndarray) -> bool:
+        """Checks whether the drone is outside the allowed training workspace."""
+        return (
+            abs(state[0]) > self.XY_BOUND_M
+            or abs(state[1]) > self.XY_BOUND_M
+            or state[2] > self.Z_UPPER_BOUND_M
+        )
+
+    def _is_timeout(self) -> bool:
+        """Checks whether the current episode exceeded max duration."""
+        return self.step_counter / self.PYB_FREQ > self.EPISODE_LEN_SEC
 
     def _computeShaping(self, state: np.ndarray) -> float:
         """Computes shaping term used in r_t = shaping_t - shaping_{t-1}."""
