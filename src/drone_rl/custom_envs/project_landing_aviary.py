@@ -81,6 +81,26 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.SUCCESS_TILT_RAD = 0.22
         self.SUCCESS_ANG_SPEED_RADPS = 0.65
 
+        # Reward shaping coefficients adapted from paper index.pdf Eq. (10)-(11).
+        self.SHAPING_POS_COEFF = 100.0
+        self.SHAPING_VEL_COEFF = 10.0
+        self.SHAPING_ACTION_COEFF = 1.0
+        # Penalize angular-rate magnitude (roll/pitch/yaw rates) to improve landing stability.
+        self.SHAPING_ANGVEL_COEFF = 5.0
+        # Explicit altitude and descent shaping to avoid hovering local optimum.
+        self.SHAPING_ALTITUDE_COEFF = 30.0
+        self.SHAPING_DESCENT_COEFF = 12.0
+        self.DESCENT_TARGET_MPS = -0.20
+        self.CONTACT_BONUS_COEFF = 10.0
+        # Small per-step time cost to encourage timely landing.
+        self.STEP_TIME_COST = 0.02
+        # Positive terminal bonus when the stable landing condition is met.
+        self.TERMINAL_LANDING_BONUS = 300.0
+        # Keep an explicit crash penalty for safety during exploration.
+        self.CRASH_PENALTY = 10000.0
+        # Differential shaping requires the previous shaping value from the prior step.
+        self.previous_shaping = 0.0
+
         super().__init__(
             drone_model=drone_model,
             num_drones=1,
@@ -144,7 +164,6 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
                 rng.uniform(-self.INIT_YAW_RANGE_RAD, self.INIT_YAW_RANGE_RAD),
             ]
         )
-
         # Random linear and angular velocity (bounded to avoid unstable launches).
         init_linear_vel = np.array(
             [
@@ -177,47 +196,27 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
 
         # Refresh cached kinematics and return consistent first observation.
         self._updateAndStoreKinematicInformation()
+        # Initialize previous shaping at reset so the first reward step is consistent.
+        state = self._getDroneStateVector(0)
+        self.previous_shaping = self._computeShaping(state)
         return self._computeObs(), info
 
     def _computeReward(self):
-        """Computes reward for stabilization + controlled descent + safe touchdown."""
+        """Computes landing reward using differential shaping from the referenced paper."""
         state = self._getDroneStateVector(0)
+        shaping = self._computeShaping(state)
+        reward = shaping - self.previous_shaping
+        self.previous_shaping = shaping
 
-        # Position and attitude terms.
-        xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
-        altitude = state[2]
-        tilt_norm = np.linalg.norm(state[7:9])
+        # Encourage finishing the task quickly instead of hovering indefinitely.
+        reward -= self.STEP_TIME_COST
 
-        # Velocity terms.
-        linear_speed = np.linalg.norm(state[10:13])
-        angular_speed = np.linalg.norm(state[13:16])
-
-        # Encourage approach to landing point, descending, and balancing.
-        reward = 0.0
-        reward += 1.8 * np.exp(-4.0 * xy_error)
-        reward += 1.4 * np.exp(-2.5 * altitude)
-        reward += 1.2 * np.exp(-3.5 * tilt_norm)
-        reward += 1.0 * np.exp(-2.0 * linear_speed)
-        reward += 0.8 * np.exp(-1.5 * angular_speed)
-
-        # Reward stable behavior near the ground (low tilt + low speeds).
-        if altitude < 0.30:
-            reward += 1.2 * np.exp(-4.0 * tilt_norm)
-            reward += 1.0 * np.exp(-3.0 * linear_speed)
-            reward += 0.8 * np.exp(-2.0 * angular_speed)
-
-        # Encourage downward movement while still above touchdown zone.
-        if altitude > self.SUCCESS_ALTITUDE_M:
-            descent_bonus = np.clip(-state[12], 0.0, 0.40)
-            reward += 0.8 * descent_bonus
-
-        # Strong success bonus when all touchdown conditions are met.
+        # Explicitly reward successful stable touchdown.
         if self._is_successful_landing(state):
-            reward += 1000.0
+            reward += self.TERMINAL_LANDING_BONUS
 
-        # Strongly penalize crash/out-of-control states so the agent learns to avoid them.
         if self._is_crash_condition(state):
-            reward -= 500.0
+            reward -= self.CRASH_PENALTY
 
         return float(reward)
 
@@ -261,3 +260,37 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         too_fast = np.linalg.norm(state[10:13]) > 3.0 or np.linalg.norm(state[13:16]) > 8.0
         below_floor = state[2] < -0.05
         return over_tilted or too_fast or below_floor
+
+    def _computeShaping(self, state: np.ndarray) -> float:
+        """Computes shaping term used in r_t = shaping_t - shaping_{t-1}."""
+        # Relative planar position and velocity errors.
+        px = state[0] - self.TARGET_XY[0]
+        py = state[1] - self.TARGET_XY[1]
+        z = state[2]
+        vx = state[10]
+        vy = state[11]
+        vz = state[12]
+        wx = state[13]
+        wy = state[14]
+        wz = state[15]
+
+        # Use normalized action magnitudes from the latest policy command.
+        # RPM control has 4 actions; we aggregate them into one smoothness magnitude.
+        latest_action = self.action_buffer[-1][0]
+        action_l2 = np.linalg.norm(latest_action)
+        action_mean_abs = float(np.mean(np.abs(latest_action)))
+
+        # Contact-like indicator adapted for this task:
+        # near ground and low vertical speed approximates touchdown state.
+        contact_like = 1.0 if (state[2] < 0.10 and abs(state[12]) < 0.20) else 0.0
+
+        shaping = (
+            -self.SHAPING_POS_COEFF * np.sqrt(px**2 + py**2)
+            -self.SHAPING_ALTITUDE_COEFF * z
+            -self.SHAPING_VEL_COEFF * np.sqrt(vx**2 + vy**2)
+            -self.SHAPING_DESCENT_COEFF * abs(vz - self.DESCENT_TARGET_MPS)
+            -self.SHAPING_ACTION_COEFF * action_l2
+            -self.SHAPING_ANGVEL_COEFF * np.sqrt(wx**2 + wy**2 + wz**2)
+            +self.CONTACT_BONUS_COEFF * contact_like * (1.0 - action_mean_abs)
+        )
+        return float(shaping)

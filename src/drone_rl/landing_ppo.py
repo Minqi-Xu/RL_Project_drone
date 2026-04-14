@@ -32,8 +32,8 @@ class LandingPPOConfig:
     total_timesteps: int = 1e7
     eval_freq: int = 2000
     n_eval_episodes: int = 10
-    # Lower threshold than hover baseline because this reward function differs.
-    reward_threshold: float = 80.0
+    # Differential shaping reward with terminal bonus requires a higher early-stop target.
+    reward_threshold: float = 250.0
     verbose: int = 1
     deterministic_eval: bool = True
 
