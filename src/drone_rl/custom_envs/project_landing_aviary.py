@@ -104,9 +104,8 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.OUT_OF_BOUNDS_PENALTY = 5000.0
         self.TIMEOUT_PENALTY = 3000.0
         # Failed-touchdown XY penalty parameters:
-        # e<5 -> 4*e^4, e in [5,20] -> linear from 2500 to 5000, e>20 -> 5000.
+        # e<5 -> 40*e^2, e>=5 -> 200*e (no upper limit).
         self.FAILED_LANDING_XY_BREAKPOINT_M = 5.0
-        self.FAILED_LANDING_XY_MAX_M = 20.0
         # Larger XY workspace for landing training.
         self.XY_BOUND_M = 20.0
         self.Z_UPPER_BOUND_M = 5.0
@@ -295,11 +294,8 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
     def _compute_failed_touchdown_xy_penalty(self, xy_error: float) -> float:
         """Computes piecewise XY penalty for failed touchdown."""
         if xy_error < self.FAILED_LANDING_XY_BREAKPOINT_M:
-            return 4.0 * (xy_error**4)
-        if xy_error <= self.FAILED_LANDING_XY_MAX_M:
-            slope = (5000.0 - 2500.0) / (self.FAILED_LANDING_XY_MAX_M - self.FAILED_LANDING_XY_BREAKPOINT_M)
-            return 2500.0 + slope * (xy_error - self.FAILED_LANDING_XY_BREAKPOINT_M)
-        return 5000.0
+            return 40.0 * (xy_error**2)
+        return 200.0 * xy_error
 
     def _is_out_of_bounds(self, state: np.ndarray) -> bool:
         """Checks whether the drone is outside the allowed training workspace."""
