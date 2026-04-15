@@ -82,7 +82,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.SUCCESS_ANG_SPEED_RADPS = 0.65
 
         # Reward shaping coefficients adapted from paper index.pdf Eq. (10)-(11).
-        self.SHAPING_POS_COEFF = 100.0
+        self.SHAPING_POS_COEFF = 180.0
         self.SHAPING_VEL_COEFF = 10.0
         self.SHAPING_ACTION_COEFF = 1.0
         # Penalize angular-rate magnitude (roll/pitch/yaw rates) to improve landing stability.
@@ -91,21 +91,28 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.SHAPING_ALTITUDE_COEFF = 30.0
         self.SHAPING_DESCENT_COEFF = 12.0
         self.DESCENT_TARGET_MPS = -0.20
+        # Extra reward for actual altitude decrease at each step.
+        self.ALTITUDE_PROGRESS_GAIN = 120.0
         self.CONTACT_BONUS_COEFF = 10.0
         # Small per-step time cost to encourage timely landing.
         self.STEP_TIME_COST = 0.02
         # Positive terminal bonus when the stable landing condition is met.
-        self.TERMINAL_LANDING_BONUS = 300.0
+        self.TERMINAL_LANDING_BONUS = 1500.0
         # Keep an explicit crash penalty for safety during exploration.
         self.CRASH_PENALTY = 10000.0
         # Penalize non-crash truncation reasons to discourage stalling or drifting away.
-        self.OUT_OF_BOUNDS_PENALTY = 10000.0
-        self.TIMEOUT_PENALTY = 10000.0
+        self.OUT_OF_BOUNDS_PENALTY = 5000.0
+        self.TIMEOUT_PENALTY = 3000.0
+        # Failed-touchdown XY penalty parameters:
+        # e<5 -> 4*e^4, e in [5,20] -> linear from 2500 to 5000, e>20 -> 5000.
+        self.FAILED_LANDING_XY_BREAKPOINT_M = 5.0
+        self.FAILED_LANDING_XY_MAX_M = 20.0
         # Larger XY workspace for landing training.
-        self.XY_BOUND_M = 5.0
-        self.Z_UPPER_BOUND_M = 2.2
+        self.XY_BOUND_M = 20.0
+        self.Z_UPPER_BOUND_M = 5.0
         # Differential shaping requires the previous shaping value from the prior step.
         self.previous_shaping = 0.0
+        self.previous_altitude = 0.0
 
         super().__init__(
             drone_model=drone_model,
@@ -205,6 +212,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         # Initialize previous shaping at reset so the first reward step is consistent.
         state = self._getDroneStateVector(0)
         self.previous_shaping = self._computeShaping(state)
+        self.previous_altitude = float(state[2])
         return self._computeObs(), info
 
     def _computeReward(self):
@@ -213,6 +221,10 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         shaping = self._computeShaping(state)
         reward = shaping - self.previous_shaping
         self.previous_shaping = shaping
+        altitude = float(state[2])
+        altitude_drop = max(0.0, self.previous_altitude - altitude)
+        reward += self.ALTITUDE_PROGRESS_GAIN * altitude_drop
+        self.previous_altitude = altitude
 
         # Encourage finishing the task quickly instead of hovering indefinitely.
         reward -= self.STEP_TIME_COST
@@ -220,6 +232,10 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         # Explicitly reward successful stable touchdown.
         if self._is_successful_landing(state):
             reward += self.TERMINAL_LANDING_BONUS
+
+        if self._is_failed_touchdown(state):
+            xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
+            reward -= self._compute_failed_touchdown_xy_penalty(xy_error)
 
         if self._is_out_of_bounds(state):
             reward -= self.OUT_OF_BOUNDS_PENALTY
@@ -233,9 +249,9 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         return float(reward)
 
     def _computeTerminated(self):
-        """Episode terminates only when a stable landing state is reached."""
+        """Episode terminates when landing is complete (successful or failed touchdown)."""
         state = self._getDroneStateVector(0)
-        return self._is_successful_landing(state)
+        return self._is_successful_landing(state) or self._is_failed_touchdown(state)
 
     def _computeTruncated(self):
         """Truncates on unsafe flight or time limit."""
@@ -270,6 +286,20 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         too_fast = np.linalg.norm(state[10:13]) > 3.0 or np.linalg.norm(state[13:16]) > 8.0
         below_floor = state[2] < -0.05
         return over_tilted or too_fast or below_floor
+
+    def _is_failed_touchdown(self, state: np.ndarray) -> bool:
+        """Checks for touchdown-like state that does not meet the success condition."""
+        touchdown_like = state[2] < 0.10
+        return touchdown_like and (not self._is_successful_landing(state)) and (not self._is_crash_condition(state))
+
+    def _compute_failed_touchdown_xy_penalty(self, xy_error: float) -> float:
+        """Computes piecewise XY penalty for failed touchdown."""
+        if xy_error < self.FAILED_LANDING_XY_BREAKPOINT_M:
+            return 4.0 * (xy_error**4)
+        if xy_error <= self.FAILED_LANDING_XY_MAX_M:
+            slope = (5000.0 - 2500.0) / (self.FAILED_LANDING_XY_MAX_M - self.FAILED_LANDING_XY_BREAKPOINT_M)
+            return 2500.0 + slope * (xy_error - self.FAILED_LANDING_XY_BREAKPOINT_M)
+        return 5000.0
 
     def _is_out_of_bounds(self, state: np.ndarray) -> bool:
         """Checks whether the drone is outside the allowed training workspace."""

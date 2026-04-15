@@ -121,7 +121,7 @@ Training arguments:
 
 - `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
 - `--eval-freq`: how often the callback pauses training to evaluate the current policy. Default: `2000`
-- `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `250.0`
+- `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `1000.0`
 - `--seed`: random seed for reproducible training runs. Default: `0`
 - `--show-performance`: after training, open one real-time GUI rollout of the learned policy. Default: off
 - `--plot`: when used with `--show-performance`, display the logged state plots after the rollout finishes. Default: off
