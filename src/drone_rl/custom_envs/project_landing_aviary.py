@@ -82,7 +82,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.SUCCESS_ANG_SPEED_RADPS = 0.65
 
         # Reward shaping coefficients adapted from paper index.pdf Eq. (10)-(11).
-        self.SHAPING_POS_COEFF = 180.0
+        self.SHAPING_POS_COEFF = 320.0
         self.SHAPING_VEL_COEFF = 10.0
         self.SHAPING_ACTION_COEFF = 1.0
         # Penalize angular-rate magnitude (roll/pitch/yaw rates) to improve landing stability.
@@ -96,8 +96,11 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.CONTACT_BONUS_COEFF = 10.0
         # Small per-step time cost to encourage timely landing.
         self.STEP_TIME_COST = 0.02
-        # Positive terminal bonus when the stable landing condition is met.
-        self.TERMINAL_LANDING_BONUS = 1500.0
+        # Success bonus is computed from landing quality instead of a fixed value.
+        self.SUCCESS_BONUS_BASE = 400.0
+        self.SUCCESS_BONUS_CENTER_GAIN = 1600.0
+        self.SUCCESS_BONUS_STABILITY_GAIN = 900.0
+        self.SUCCESS_CENTER_SCALE_M = 0.60
         # Keep an explicit crash penalty for safety during exploration.
         self.CRASH_PENALTY = 10000.0
         # Penalize non-crash truncation reasons to discourage stalling or drifting away.
@@ -230,7 +233,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
 
         # Explicitly reward successful stable touchdown.
         if self._is_successful_landing(state):
-            reward += self.TERMINAL_LANDING_BONUS
+            reward += self._compute_success_landing_bonus(state)
 
         if self._is_failed_touchdown(state):
             xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
@@ -296,6 +299,36 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         if xy_error < self.FAILED_LANDING_XY_BREAKPOINT_M:
             return 40.0 * (xy_error**2)
         return 200.0 * xy_error
+
+    def _compute_success_landing_bonus(self, state: np.ndarray) -> float:
+        """Computes a quality-based terminal success bonus for stable and centered touchdown."""
+        xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
+        altitude = state[2]
+        linear_speed = np.linalg.norm(state[10:13])
+        angular_speed = np.linalg.norm(state[13:16])
+        tilt_norm = np.linalg.norm(state[7:9])
+
+        # Strongly favor center landing: near zero error -> near 1, off-center decays quickly.
+        center_score = np.exp(-xy_error / self.SUCCESS_CENTER_SCALE_M)
+
+        # Reward quality margin inside success thresholds.
+        speed_score = np.clip(1.0 - linear_speed / self.SUCCESS_SPEED_MPS, 0.0, 1.0)
+        ang_speed_score = np.clip(1.0 - angular_speed / self.SUCCESS_ANG_SPEED_RADPS, 0.0, 1.0)
+        tilt_score = np.clip(1.0 - tilt_norm / self.SUCCESS_TILT_RAD, 0.0, 1.0)
+        altitude_score = np.clip(1.0 - altitude / self.SUCCESS_ALTITUDE_M, 0.0, 1.0)
+
+        stability_score = (
+            0.35 * speed_score
+            + 0.25 * ang_speed_score
+            + 0.25 * tilt_score
+            + 0.15 * altitude_score
+        )
+
+        return (
+            self.SUCCESS_BONUS_BASE
+            + self.SUCCESS_BONUS_CENTER_GAIN * center_score
+            + self.SUCCESS_BONUS_STABILITY_GAIN * stability_score
+        )
 
     def _is_out_of_bounds(self, state: np.ndarray) -> bool:
         """Checks whether the drone is outside the allowed training workspace."""
