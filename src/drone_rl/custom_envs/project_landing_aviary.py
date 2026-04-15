@@ -82,7 +82,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.SUCCESS_ANG_SPEED_RADPS = 0.65
 
         # Reward shaping coefficients adapted from paper index.pdf Eq. (10)-(11).
-        self.SHAPING_POS_COEFF = 320.0
+        self.SHAPING_POS_COEFF = 450.0
         self.SHAPING_VEL_COEFF = 10.0
         self.SHAPING_ACTION_COEFF = 1.0
         # Penalize angular-rate magnitude (roll/pitch/yaw rates) to improve landing stability.
@@ -96,11 +96,8 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         self.CONTACT_BONUS_COEFF = 10.0
         # Small per-step time cost to encourage timely landing.
         self.STEP_TIME_COST = 0.02
-        # Success bonus is computed from landing quality instead of a fixed value.
-        self.SUCCESS_BONUS_BASE = 400.0
-        self.SUCCESS_BONUS_CENTER_GAIN = 1600.0
-        self.SUCCESS_BONUS_STABILITY_GAIN = 900.0
-        self.SUCCESS_CENTER_SCALE_M = 0.60
+        # Stability-guidance reward used only at touchdown.
+        self.STABILITY_GUIDANCE_GAIN = 1200.0
         # Keep an explicit crash penalty for safety during exploration.
         self.CRASH_PENALTY = 10000.0
         # Penalize non-crash truncation reasons to discourage stalling or drifting away.
@@ -231,13 +228,13 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         # Encourage finishing the task quickly instead of hovering indefinitely.
         reward -= self.STEP_TIME_COST
 
-        # Explicitly reward successful stable touchdown.
-        if self._is_successful_landing(state):
-            reward += self._compute_success_landing_bonus(state)
+        if self._is_touchdown_like(state):
+            # Apply touchdown stability guidance only when the drone is on/near the landing plane.
+            reward += self._compute_stability_guidance_reward(state) * self.CTRL_TIMESTEP
 
-        if self._is_failed_touchdown(state):
+            # Always apply XY touchdown penalty regardless of success/failure quality.
             xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
-            reward -= self._compute_failed_touchdown_xy_penalty(xy_error)
+            reward -= self.touchdown_xy_penalty(xy_error)
 
         if self._is_out_of_bounds(state):
             reward -= self.OUT_OF_BOUNDS_PENALTY
@@ -251,9 +248,11 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         return float(reward)
 
     def _computeTerminated(self):
-        """Episode terminates when landing is complete (successful or failed touchdown)."""
+        """Episode terminates when landing is complete (successful or touchdown)."""
         state = self._getDroneStateVector(0)
-        return self._is_successful_landing(state) or self._is_failed_touchdown(state)
+        return self._is_successful_landing(state) or (
+            self._is_touchdown_like(state) and (not self._is_crash_condition(state))
+        )
 
     def _computeTruncated(self):
         """Truncates on unsafe flight or time limit."""
@@ -289,46 +288,34 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         below_floor = state[2] < -0.05
         return over_tilted or too_fast or below_floor
 
-    def _is_failed_touchdown(self, state: np.ndarray) -> bool:
-        """Checks for touchdown-like state that does not meet the success condition."""
-        touchdown_like = state[2] < 0.10
-        return touchdown_like and (not self._is_successful_landing(state)) and (not self._is_crash_condition(state))
+    def _is_touchdown_like(self, state: np.ndarray) -> bool:
+        """Checks if the drone is touching/near the landing plane with low vertical speed."""
+        return state[2] < 0.10 and abs(state[12]) < 0.20
 
-    def _compute_failed_touchdown_xy_penalty(self, xy_error: float) -> float:
-        """Computes piecewise XY penalty for failed touchdown."""
+    def touchdown_xy_penalty(self, xy_error: float) -> float:
+        """Computes piecewise XY penalty for touchdown."""
         if xy_error < self.FAILED_LANDING_XY_BREAKPOINT_M:
             return 40.0 * (xy_error**2)
         return 200.0 * xy_error
 
-    def _compute_success_landing_bonus(self, state: np.ndarray) -> float:
-        """Computes a quality-based terminal success bonus for stable and centered touchdown."""
-        xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
-        altitude = state[2]
+    def _compute_stability_guidance_reward(self, state: np.ndarray) -> float:
+        """Computes smooth touchdown guidance reward from stability terms."""
         linear_speed = np.linalg.norm(state[10:13])
         angular_speed = np.linalg.norm(state[13:16])
         tilt_norm = np.linalg.norm(state[7:9])
 
-        # Strongly favor center landing: near zero error -> near 1, off-center decays quickly.
-        center_score = np.exp(-xy_error / self.SUCCESS_CENTER_SCALE_M)
-
-        # Reward quality margin inside success thresholds.
-        speed_score = np.clip(1.0 - linear_speed / self.SUCCESS_SPEED_MPS, 0.0, 1.0)
-        ang_speed_score = np.clip(1.0 - angular_speed / self.SUCCESS_ANG_SPEED_RADPS, 0.0, 1.0)
-        tilt_score = np.clip(1.0 - tilt_norm / self.SUCCESS_TILT_RAD, 0.0, 1.0)
-        altitude_score = np.clip(1.0 - altitude / self.SUCCESS_ALTITUDE_M, 0.0, 1.0)
+        # Smooth (non-clipped) stability terms so there is gradient outside success intervals.
+        speed_score = np.exp(-linear_speed / self.SUCCESS_SPEED_MPS)
+        ang_speed_score = np.exp(-angular_speed / self.SUCCESS_ANG_SPEED_RADPS)
+        tilt_score = np.exp(-tilt_norm / self.SUCCESS_TILT_RAD)
 
         stability_score = (
-            0.35 * speed_score
-            + 0.25 * ang_speed_score
+            0.45 * speed_score
+            + 0.30 * ang_speed_score
             + 0.25 * tilt_score
-            + 0.15 * altitude_score
         )
 
-        return (
-            self.SUCCESS_BONUS_BASE
-            + self.SUCCESS_BONUS_CENTER_GAIN * center_score
-            + self.SUCCESS_BONUS_STABILITY_GAIN * stability_score
-        )
+        return self.STABILITY_GUIDANCE_GAIN * stability_score
 
     def _is_out_of_bounds(self, state: np.ndarray) -> bool:
         """Checks whether the drone is outside the allowed training workspace."""
