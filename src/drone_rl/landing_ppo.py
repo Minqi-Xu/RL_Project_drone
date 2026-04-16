@@ -32,8 +32,8 @@ class LandingPPOConfig:
     total_timesteps: int = 1e7
     eval_freq: int = 2000
     n_eval_episodes: int = 10
-    # Reward scale includes a +1500 terminal bonus for successful landing.
-    reward_threshold: float = 1000.0
+    # Differential shaping reward uses smaller per-step increments than terminal-bonus rewards.
+    reward_threshold: float = 20.0
     verbose: int = 1
     deterministic_eval: bool = True
 
@@ -221,7 +221,7 @@ def show_model_performance(
             truncated,
         )
 
-        if get_obs_type(config) == ObservationType.KIN:
+        if get_obs_type(config) == ObservationType.KIN and obs_data.shape[0] >= 15:
             logger.log(
                 drone=0,
                 timestamp=step / test_env.CTRL_FREQ,

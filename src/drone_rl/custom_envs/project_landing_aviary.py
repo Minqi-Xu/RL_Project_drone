@@ -1,21 +1,21 @@
 """Local project landing aviary task environment.
 
-Initial version structure follows: drone_rl.custom_envs.project_hover_aviary
-This environment is maintained separately so landing-stage tuning does not affect
-hover-stage training code.
+This landing environment is intentionally kept separate from hover code so
+landing-stage tuning does not affect hover-stage training.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pybullet as p
+from gymnasium import spaces
 
 from drone_rl.custom_envs.project_rl_base_aviary import ProjectBaseRLAviary
 from gym_pybullet_drones.utils.enums import ActionType, DroneModel, ObservationType, Physics
 
 
 class ProjectLandingAviary(ProjectBaseRLAviary):
-    """Single-agent RL problem: recover from imbalance and land safely."""
+    """Single-agent RL problem: descend and land near target using 4 motor actions."""
 
     def __init__(
         self,
@@ -30,88 +30,46 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         obs: ObservationType = ObservationType.KIN,
         act: ActionType = ActionType.RPM,
     ):
-        """Initialization of a single-agent RL environment for landing.
+        """Initialization of a single-agent RL environment for landing."""
+        # Landing target at origin in world frame.
+        self.TARGET_POS = np.array([0.0, 0.0, 0.0])
 
-        Parameters
-        ----------
-        drone_model : DroneModel, optional
-            The desired drone type (detailed in an .urdf file in folder `assets`).
-        initial_xyzs : ndarray | None, optional
-            (NUM_DRONES, 3)-shaped array containing the initial XYZ position.
-        initial_rpys : ndarray | None, optional
-            (NUM_DRONES, 3)-shaped array containing initial roll/pitch/yaw (radians).
-        physics : Physics, optional
-            The desired implementation of PyBullet physics/custom dynamics.
-        pyb_freq : int, optional
-            The frequency at which PyBullet steps (a multiple of ctrl_freq).
-        ctrl_freq : int, optional
-            The frequency at which the environment steps.
-        gui : bool, optional
-            Whether to use PyBullet's GUI.
-        record : bool, optional
-            Whether to save a video of the simulation.
-        obs : ObservationType, optional
-            The type of observation space (kinematic information or vision).
-        act : ActionType, optional
-            The action type. Landing defaults to full 4-motor RPM control.
+        # Episode and landing geometry.
+        self.EPISODE_LEN_SEC = 8
+        self.TOUCHDOWN_ALTITUDE_M = 0.05
 
-        """
-        # Hover-stage target used as the center of the randomized landing start.
-        self.HOVER_TARGET_POS = np.array([0.0, 0.0, 1.0])
-        # Reference touchdown point near the world origin.
-        self.TARGET_XY = np.array([0.0, 0.0])
-        # Landing can take longer than hover because the agent must stabilize first.
-        self.EPISODE_LEN_SEC = 10
-
-        # Reset randomization ranges around the hover target position.
+        # Randomized starts around hover point near z=1.
+        self.HOVER_START_POS = np.array([0.0, 0.0, 1.0])
         self.INIT_XY_RANGE_M = 0.12
         self.INIT_Z_OFFSET_RANGE_M = (-0.05, 0.05)
-
-        # Keep initial orientation and velocities "random but not crazy".
         self.INIT_RP_RANGE_RAD = 0.25
         self.INIT_YAW_RANGE_RAD = np.pi
         self.INIT_VEL_XY_RANGE_MPS = 0.35
         self.INIT_VEL_Z_RANGE_MPS = 0.25
         self.INIT_ANG_VEL_RANGE_RADPS = 1.20
 
-        # Success thresholds for a stable touchdown state.
-        self.SUCCESS_XY_ERR_M = 0.08
-        self.SUCCESS_ALTITUDE_M = 0.08
-        self.SUCCESS_SPEED_MPS = 0.18
-        self.SUCCESS_TILT_RAD = 0.22
-        self.SUCCESS_ANG_SPEED_RADPS = 0.65
+        # Reward shaping weights:
+        # shaping_t = -wp*||dpos|| - wv*||vel|| - wa*(|roll|+|pitch|)
+        #             - ww*||ang_vel|| - wu*||action||.
+        self.W_POS = 2.0
+        self.W_VEL = 0.8
+        self.W_ATT = 0.5
+        self.W_ANG_VEL = 0.05
+        self.W_ACTION = 0.05
 
-        # Reward shaping coefficients adapted from paper index.pdf Eq. (10)-(11).
-        self.SHAPING_POS_COEFF = 450.0
-        self.SHAPING_VEL_COEFF = 10.0
-        self.SHAPING_ACTION_COEFF = 1.0
-        # Penalize angular-rate magnitude (roll/pitch/yaw rates) to improve landing stability.
-        self.SHAPING_ANGVEL_COEFF = 5.0
-        # Explicit altitude and descent shaping to avoid hovering local optimum.
-        self.SHAPING_ALTITUDE_COEFF = 30.0
-        self.SHAPING_DESCENT_COEFF = 12.0
-        self.DESCENT_TARGET_MPS = -0.20
-        # Extra reward for actual altitude decrease at each step.
-        self.ALTITUDE_PROGRESS_GAIN = 120.0
-        self.CONTACT_BONUS_COEFF = 10.0
-        # Small per-step time cost to encourage timely landing.
-        self.STEP_TIME_COST = 0.02
-        # Stability-guidance reward used only at touchdown.
-        self.STABILITY_GUIDANCE_GAIN = 1200.0
-        # Keep an explicit crash penalty for safety during exploration.
-        self.CRASH_PENALTY = 10000.0
-        # Penalize non-crash truncation reasons to discourage stalling or drifting away.
-        self.OUT_OF_BOUNDS_PENALTY = 5000.0
-        self.TIMEOUT_PENALTY = 3000.0
-        # Failed-touchdown XY penalty parameters:
-        # e<5 -> 40*e^2, e>=5 -> 200*e (no upper limit).
-        self.FAILED_LANDING_XY_BREAKPOINT_M = 5.0
-        # Larger XY workspace for landing training.
-        self.XY_BOUND_M = 20.0
-        self.Z_UPPER_BOUND_M = 5.0
-        # Differential shaping requires the previous shaping value from the prior step.
-        self.previous_shaping = 0.0
-        self.previous_altitude = 0.0
+        # Terminal rewards/penalties.
+        self.SUCCESS_REWARD = 50.0
+        self.FAILURE_PENALTY = -50.0
+
+        # Success / failure thresholds.
+        self.SUCCESS_XY_ERR_M = 0.05
+        self.SUCCESS_SPEED_MPS = 0.15
+        self.SUCCESS_ATT_RAD = 0.25
+        self.FAIL_ATT_RAD = 1.0
+        self.HARD_LANDING_SPEED_MPS = 0.45
+        self.BOUND_X_M = 5.0
+        self.BOUND_Y_M = 5.0
+        self.BOUND_Z_M = 2.5
 
         super().__init__(
             drone_model=drone_model,
@@ -127,8 +85,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
             act=act,
         )
 
-        # Do not treat literal contact with the plane as immediate failure.
-        # This lets the policy learn to complete controlled touchdowns.
+        # Keep plane collision disabled so touchdown is judged by altitude threshold.
         p.setCollisionFilterPair(
             bodyUniqueIdA=self.PLANE_ID,
             bodyUniqueIdB=self.DRONE_IDS[0],
@@ -139,15 +96,10 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         )
 
     def reset(self, seed: int | None = None, options: dict | None = None):
-        """Resets the environment and randomizes landing-stage initial conditions.
+        """Resets environment and randomizes initial state around (0,0,1)."""
+        _obs, info = super().reset(seed=seed, options=options)
 
-        The drone starts around (0, 0, 1) with moderate random translational and
-        angular velocities to represent imbalanced conditions.
-
-        """
-        obs, info = super().reset(seed=seed, options=options)
-
-        # Keep the plane-drone collision disabled after each reset.
+        # Keep plane collision disabled after each reset.
         p.setCollisionFilterPair(
             bodyUniqueIdA=self.PLANE_ID,
             bodyUniqueIdB=self.DRONE_IDS[0],
@@ -157,18 +109,15 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
             physicsClientId=self.CLIENT,
         )
 
-        rng = np.random.default_rng(seed)
+        rng = self.np_random
 
-        # Random position near the hover target (0, 0, 1).
         init_pos = np.array(
             [
-                self.HOVER_TARGET_POS[0] + rng.uniform(-self.INIT_XY_RANGE_M, self.INIT_XY_RANGE_M),
-                self.HOVER_TARGET_POS[1] + rng.uniform(-self.INIT_XY_RANGE_M, self.INIT_XY_RANGE_M),
-                self.HOVER_TARGET_POS[2] + rng.uniform(self.INIT_Z_OFFSET_RANGE_M[0], self.INIT_Z_OFFSET_RANGE_M[1]),
+                self.HOVER_START_POS[0] + rng.uniform(-self.INIT_XY_RANGE_M, self.INIT_XY_RANGE_M),
+                self.HOVER_START_POS[1] + rng.uniform(-self.INIT_XY_RANGE_M, self.INIT_XY_RANGE_M),
+                self.HOVER_START_POS[2] + rng.uniform(self.INIT_Z_OFFSET_RANGE_M[0], self.INIT_Z_OFFSET_RANGE_M[1]),
             ]
         )
-
-        # Random roll/pitch with free yaw.
         init_rpy = np.array(
             [
                 rng.uniform(-self.INIT_RP_RANGE_RAD, self.INIT_RP_RANGE_RAD),
@@ -176,7 +125,6 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
                 rng.uniform(-self.INIT_YAW_RANGE_RAD, self.INIT_YAW_RANGE_RAD),
             ]
         )
-        # Random linear and angular velocity (bounded to avoid unstable launches).
         init_linear_vel = np.array(
             [
                 rng.uniform(-self.INIT_VEL_XY_RANGE_MPS, self.INIT_VEL_XY_RANGE_MPS),
@@ -192,7 +140,6 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
             ]
         )
 
-        # Apply randomized state directly in PyBullet.
         p.resetBasePositionAndOrientation(
             self.DRONE_IDS[0],
             init_pos,
@@ -206,159 +153,131 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
             physicsClientId=self.CLIENT,
         )
 
-        # Refresh cached kinematics and return consistent first observation.
         self._updateAndStoreKinematicInformation()
-        # Initialize previous shaping at reset so the first reward step is consistent.
-        state = self._getDroneStateVector(0)
-        self.previous_shaping = self._computeShaping(state)
-        self.previous_altitude = float(state[2])
+
         return self._computeObs(), info
 
+    def _observationSpace(self):
+        """Returns observation space for landing state."""
+        lo = -np.inf
+        hi = np.inf
+        obs_lower_bound = np.array([[lo, lo, lo, lo, lo, lo, lo, lo, lo, lo, lo]])
+        obs_upper_bound = np.array([[hi, hi, hi, hi, hi, hi, hi, hi, hi, hi, hi]])
+        return spaces.Box(low=obs_lower_bound, high=obs_upper_bound, dtype=np.float32)
+
+    def _computeObs(self):
+        """Returns current landing observation.
+
+        State:
+        [dx, dy, dz, vx, vy, vz, roll, pitch, p, q, r]
+        """
+        return np.array([self._get_landing_state()], dtype=np.float32)
+
     def _computeReward(self):
-        """Computes landing reward using differential shaping from the referenced paper."""
-        state = self._getDroneStateVector(0)
-        shaping = self._computeShaping(state)
-        reward = shaping - self.previous_shaping
-        self.previous_shaping = shaping
-        altitude = float(state[2])
-        altitude_drop = max(0.0, self.previous_altitude - altitude)
-        reward += self.ALTITUDE_PROGRESS_GAIN * altitude_drop
-        self.previous_altitude = altitude
+        """Computes per-step shaping reward with terminal bonuses/penalties."""
+        landing_state = self._get_landing_state()
+        reward = self._compute_shaping(landing_state)
 
-        # Encourage finishing the task quickly instead of hovering indefinitely.
-        reward -= self.STEP_TIME_COST
-
-        if self._is_touchdown_like(state):
-            # Apply touchdown stability guidance only when the drone is on/near the landing plane.
-            reward += self._compute_stability_guidance_reward(state) * self.CTRL_TIMESTEP
-
-            # Always apply XY touchdown penalty regardless of success/failure quality.
-            xy_error = np.linalg.norm(state[0:2] - self.TARGET_XY)
-            reward -= self.touchdown_xy_penalty(xy_error)
-
-        if self._is_out_of_bounds(state):
-            reward -= self.OUT_OF_BOUNDS_PENALTY
-
-        if self._is_timeout():
-            reward -= self.TIMEOUT_PENALTY
-
-        if self._is_crash_condition(state):
-            reward -= self.CRASH_PENALTY
-
+        if self._is_success(landing_state):
+            reward += self.SUCCESS_REWARD
+        elif self._is_failure(landing_state):
+            reward += self.FAILURE_PENALTY
+        # Landed but not success: no terminal bonus/penalty.
         return float(reward)
 
     def _computeTerminated(self):
-        """Episode terminates when landing is complete (successful or touchdown)."""
-        state = self._getDroneStateVector(0)
-        return self._is_successful_landing(state) or (
-            self._is_touchdown_like(state) and (not self._is_crash_condition(state))
+        """Computes episode termination."""
+        landing_state = self._get_landing_state()
+        return bool(
+            self._is_success(landing_state)
+            or self._is_landed(landing_state)
+            or self._is_failure(landing_state)
         )
 
     def _computeTruncated(self):
-        """Truncates on unsafe flight or time limit."""
-        state = self._getDroneStateVector(0)
-
-        out_of_bounds = self._is_out_of_bounds(state)
-        timeout = self._is_timeout()
-
-        return out_of_bounds or self._is_crash_condition(state) or timeout
+        """No separate truncation."""
+        return False
 
     def _computeInfo(self):
-        """Computes the current info dict (kept lightweight for SB3 compatibility)."""
-        return {"task": "landing"}
+        """Computes current info dictionary."""
+        landing_state = self._get_landing_state()
+        return {
+            "task": "landing",
+            "success": self._is_success(landing_state),
+            "landed": self._is_landed(landing_state),
+            "failure": self._is_failure(landing_state),
+        }
 
-    def _is_successful_landing(self, state: np.ndarray) -> bool:
-        """Checks if the drone satisfies stable touchdown criteria."""
-        altitude = state[2]
-        linear_speed = np.linalg.norm(state[10:13])
-        angular_speed = np.linalg.norm(state[13:16])
-        tilt_norm = np.linalg.norm(state[7:9])
-
-        return (
-            altitude < self.SUCCESS_ALTITUDE_M
-            and linear_speed < self.SUCCESS_SPEED_MPS
-            and angular_speed < self.SUCCESS_ANG_SPEED_RADPS
-            and tilt_norm < self.SUCCESS_TILT_RAD
+    def _get_landing_state(self) -> np.ndarray:
+        """Returns [dx, dy, dz, vx, vy, vz, roll, pitch, p, q, r]."""
+        state = self._getDroneStateVector(0)
+        delta_pos = state[0:3] - self.TARGET_POS
+        vel = state[10:13]
+        roll = state[7]
+        pitch = state[8]
+        ang_vel = state[13:16]
+        return np.array(
+            [
+                delta_pos[0],
+                delta_pos[1],
+                delta_pos[2],
+                vel[0],
+                vel[1],
+                vel[2],
+                roll,
+                pitch,
+                ang_vel[0],
+                ang_vel[1],
+                ang_vel[2],
+            ],
+            dtype=np.float32,
         )
 
-    def _is_crash_condition(self, state: np.ndarray) -> bool:
-        """Checks if the drone is in a crash or strongly out-of-control state."""
-        over_tilted = abs(state[7]) > 1.0 or abs(state[8]) > 1.0
-        too_fast = np.linalg.norm(state[10:13]) > 3.0 or np.linalg.norm(state[13:16]) > 8.0
-        below_floor = state[2] < -0.05
-        return over_tilted or too_fast or below_floor
+    def _compute_shaping(self, landing_state: np.ndarray) -> float:
+        """Computes paper-style shaping_t for landing."""
+        dx, dy, dz, vx, vy, vz, roll, pitch, p_rate, q_rate, r_rate = landing_state
 
-    def _is_touchdown_like(self, state: np.ndarray) -> bool:
-        """Checks if the drone is touching/near the landing plane with low vertical speed."""
-        return state[2] < 0.10 and abs(state[12]) < 0.20
-
-    def touchdown_xy_penalty(self, xy_error: float) -> float:
-        """Computes piecewise XY penalty for touchdown."""
-        if xy_error < self.FAILED_LANDING_XY_BREAKPOINT_M:
-            return 40.0 * (xy_error**2)
-        return 200.0 * xy_error
-
-    def _compute_stability_guidance_reward(self, state: np.ndarray) -> float:
-        """Computes smooth touchdown guidance reward from stability terms."""
-        linear_speed = np.linalg.norm(state[10:13])
-        angular_speed = np.linalg.norm(state[13:16])
-        tilt_norm = np.linalg.norm(state[7:9])
-
-        # Smooth (non-clipped) stability terms so there is gradient outside success intervals.
-        speed_score = np.exp(-linear_speed / self.SUCCESS_SPEED_MPS)
-        ang_speed_score = np.exp(-angular_speed / self.SUCCESS_ANG_SPEED_RADPS)
-        tilt_score = np.exp(-tilt_norm / self.SUCCESS_TILT_RAD)
-
-        stability_score = (
-            0.45 * speed_score
-            + 0.30 * ang_speed_score
-            + 0.25 * tilt_score
-        )
-
-        return self.STABILITY_GUIDANCE_GAIN * stability_score
-
-    def _is_out_of_bounds(self, state: np.ndarray) -> bool:
-        """Checks whether the drone is outside the allowed training workspace."""
-        return (
-            abs(state[0]) > self.XY_BOUND_M
-            or abs(state[1]) > self.XY_BOUND_M
-            or state[2] > self.Z_UPPER_BOUND_M
-        )
-
-    def _is_timeout(self) -> bool:
-        """Checks whether the current episode exceeded max duration."""
-        return self.step_counter / self.PYB_FREQ > self.EPISODE_LEN_SEC
-
-    def _computeShaping(self, state: np.ndarray) -> float:
-        """Computes shaping term used in r_t = shaping_t - shaping_{t-1}."""
-        # Relative planar position and velocity errors.
-        px = state[0] - self.TARGET_XY[0]
-        py = state[1] - self.TARGET_XY[1]
-        z = state[2]
-        vx = state[10]
-        vy = state[11]
-        vz = state[12]
-        wx = state[13]
-        wy = state[14]
-        wz = state[15]
-
-        # Use normalized action magnitudes from the latest policy command.
-        # RPM control has 4 actions; we aggregate them into one smoothness magnitude.
+        # Normalized 4-motor action from latest policy step.
         latest_action = self.action_buffer[-1][0]
-        action_l2 = np.linalg.norm(latest_action)
-        action_mean_abs = float(np.mean(np.abs(latest_action)))
-
-        # Contact-like indicator adapted for this task:
-        # near ground and low vertical speed approximates touchdown state.
-        contact_like = 1.0 if (state[2] < 0.10 and abs(state[12]) < 0.20) else 0.0
+        action_l2 = float(np.linalg.norm(latest_action))
 
         shaping = (
-            -self.SHAPING_POS_COEFF * np.sqrt(px**2 + py**2)
-            -self.SHAPING_ALTITUDE_COEFF * z
-            -self.SHAPING_VEL_COEFF * np.sqrt(vx**2 + vy**2)
-            -self.SHAPING_DESCENT_COEFF * abs(vz - self.DESCENT_TARGET_MPS)
-            -self.SHAPING_ACTION_COEFF * action_l2
-            -self.SHAPING_ANGVEL_COEFF * np.sqrt(wx**2 + wy**2 + wz**2)
-            +self.CONTACT_BONUS_COEFF * contact_like * (1.0 - action_mean_abs)
+            -self.W_POS * np.sqrt(dx**2 + dy**2 + dz**2)
+            -self.W_VEL * np.sqrt(vx**2 + vy**2 + vz**2)
+            -self.W_ATT * (np.abs(roll) + np.abs(pitch))
+            -self.W_ANG_VEL * np.sqrt(p_rate**2 + q_rate**2 + r_rate**2)
+            -self.W_ACTION * action_l2
         )
         return float(shaping)
+
+    def _is_success(self, landing_state: np.ndarray) -> bool:
+        """Checks success landing condition."""
+        dx, dy, _dz, vx, vy, vz, roll, pitch, _p_rate, _q_rate, _r_rate = landing_state
+        speed = np.sqrt(vx**2 + vy**2 + vz**2)
+        return bool(
+            self._is_landed(landing_state)
+            and np.abs(dx) < self.SUCCESS_XY_ERR_M
+            and np.abs(dy) < self.SUCCESS_XY_ERR_M
+            and speed < self.SUCCESS_SPEED_MPS
+            and np.abs(roll) < self.SUCCESS_ATT_RAD
+            and np.abs(pitch) < self.SUCCESS_ATT_RAD
+        )
+
+    def _is_landed(self, landing_state: np.ndarray) -> bool:
+        """Checks touchdown from altitude threshold."""
+        dz = landing_state[2]
+        return bool(dz <= self.TOUCHDOWN_ALTITUDE_M)
+
+    def _is_failure(self, landing_state: np.ndarray) -> bool:
+        """Checks failure conditions."""
+        dx, dy, dz, vx, vy, vz, roll, pitch, _p_rate, _q_rate, _r_rate = landing_state
+        speed = np.sqrt(vx**2 + vy**2 + vz**2)
+        out_of_bounds = (
+            np.abs(dx) > self.BOUND_X_M
+            or np.abs(dy) > self.BOUND_Y_M
+            or np.abs(dz) > self.BOUND_Z_M
+        )
+        hard_landing = self._is_landed(landing_state) and speed > self.HARD_LANDING_SPEED_MPS
+        flip_too_much = np.abs(roll) > self.FAIL_ATT_RAD or np.abs(pitch) > self.FAIL_ATT_RAD
+        timeout = self.step_counter / self.PYB_FREQ > self.EPISODE_LEN_SEC
+        return bool(out_of_bounds or hard_landing or flip_too_much or timeout)
