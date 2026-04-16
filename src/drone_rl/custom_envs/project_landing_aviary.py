@@ -60,6 +60,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         # Terminal rewards/penalties.
         self.SUCCESS_REWARD = 50.0
         self.FAILURE_PENALTY = -50.0
+        self.previous_shaping = 0.0
 
         # Success / failure thresholds.
         self.SUCCESS_XY_ERR_M = 0.05
@@ -154,6 +155,8 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         )
 
         self._updateAndStoreKinematicInformation()
+        landing_state = self._get_landing_state()
+        self.previous_shaping = self._compute_shaping(landing_state)
 
         return self._computeObs(), info
 
@@ -174,9 +177,11 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         return np.array([self._get_landing_state()], dtype=np.float32)
 
     def _computeReward(self):
-        """Computes per-step shaping reward with terminal bonuses/penalties."""
+        """Computes r_t = shaping_t - shaping_(t-1) + r_success + r_fail."""
         landing_state = self._get_landing_state()
-        reward = self._compute_shaping(landing_state)
+        shaping = self._compute_shaping(landing_state)
+        reward = shaping - self.previous_shaping
+        self.previous_shaping = shaping
 
         if self._is_success(landing_state):
             reward += self.SUCCESS_REWARD
