@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a PPO landing baseline.")
     parser.add_argument("--total-timesteps", type=int, default=10000000, help="Total PPO training timesteps.")
     parser.add_argument("--eval-freq", type=int, default=2000, help="Evaluation frequency in steps.")
-    parser.add_argument("--reward-threshold", type=float, default=20.0, help="Early-stop reward threshold.")
+    parser.add_argument("--reward-threshold", type=float, default=52.2, help="Early-stop reward threshold.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed for training.")
     parser.add_argument("--show-performance", action="store_true", help="Render a post-training rollout.")
     parser.add_argument("--plot", action="store_true", help="Plot the logged rollout state after playback.")

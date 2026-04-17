@@ -31,9 +31,9 @@ class LandingPPOConfig:
     num_envs: int = 1
     total_timesteps: int = 1e7
     eval_freq: int = 2000
-    n_eval_episodes: int = 10
+    n_eval_episodes: int = 50
     # Differential shaping reward uses smaller per-step increments than terminal-bonus rewards.
-    reward_threshold: float = 20.0
+    reward_threshold: float = 52.2
     verbose: int = 1
     deterministic_eval: bool = True
 

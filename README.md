@@ -131,7 +131,7 @@ Training arguments:
 
 - `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
 - `--eval-freq`: how often the callback pauses training to evaluate the current policy. Default: `2000`
-- `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `20.0`
+- `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `52.2`
 - `--seed`: random seed for reproducible training runs. Default: `0`
 - `--show-performance`: after training, open one real-time GUI rollout of the learned policy. Default: off
 - `--plot`: when used with `--show-performance`, display the logged state plots after the rollout finishes. Default: off
@@ -145,7 +145,7 @@ python eval/eval_landing_ppo.py --model-path results/<run-folder>/best_model.zip
 Evaluation arguments:
 
 - `--model-path`: path to the saved PPO model file, usually `best_model.zip` or `final_model.zip`. Required.
-- `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `10`
+- `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `50`
 - `--gui`: run one normal-speed single-scenario PyBullet rollout and show the plots. Default: off
 
 Without `--gui`, evaluation runs only the fast metric check. With `--gui`, the script first runs the fast evaluation (using `--episodes`) and then shows one normal-speed single-scenario rollout with plots. If `best_model.zip` is not available, you can also evaluate `final_model.zip`.

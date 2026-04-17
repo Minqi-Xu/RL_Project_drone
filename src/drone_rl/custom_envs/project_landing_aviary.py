@@ -72,7 +72,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
 
         # Success / failure thresholds.
         self.SUCCESS_XY_ERR_M = 0.05
-        self.SUCCESS_SPEED_MPS = 0.15
+        self.SUCCESS_SPEED_MPS = 0.25
         self.SUCCESS_ATT_RAD = 0.25
         self.FAIL_ATT_RAD = 1.0
         self.HARD_LANDING_SPEED_MPS = 0.45
@@ -349,12 +349,13 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
     def _is_success(self, landing_state: np.ndarray) -> bool:
         """Checks success landing condition."""
         dx, dy, _dz, vx, vy, vz, roll, pitch, _p_rate, _q_rate, _r_rate = landing_state
-        speed = np.sqrt(vx**2 + vy**2 + vz**2)
         return bool(
             self._is_landed(landing_state)
             and np.abs(dx) < self.SUCCESS_XY_ERR_M
             and np.abs(dy) < self.SUCCESS_XY_ERR_M
-            and speed < self.SUCCESS_SPEED_MPS
+            and np.abs(vx) < self.SUCCESS_SPEED_MPS
+            and np.abs(vy) < self.SUCCESS_SPEED_MPS
+            and np.abs(vz) < self.SUCCESS_SPEED_MPS
             and np.abs(roll) < self.SUCCESS_ATT_RAD
             and np.abs(pitch) < self.SUCCESS_ATT_RAD
         )

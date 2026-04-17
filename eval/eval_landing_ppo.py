@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for landing-stage evaluation."""
     parser = argparse.ArgumentParser(description="Evaluate a saved PPO landing model.")
     parser.add_argument("--model-path", type=Path, required=True, help="Path to the saved .zip PPO model.")
-    parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes.")
+    parser.add_argument("--episodes", type=int, default=50, help="Number of evaluation episodes.")
     parser.add_argument("--gui", action="store_true", help="Run one real-time GUI rollout (single scenario) and show plots.")
     return parser.parse_args()
 
