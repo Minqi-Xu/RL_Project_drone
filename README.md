@@ -22,6 +22,7 @@ Project/
 │   ├── configs/                           # experiment and hyperparameter configuration files
 │   ├── eval/                              # evaluation and analysis entrypoints
 │   │   ├── eval_hover_ppo.py
+│   │   ├── eval_hover_ppo_vel.py
 │   │   ├── eval_landing_ppo.py
 │   │   └── plot_eval_rewards.py
 │   ├── models/                            # saved model checkpoints
@@ -29,15 +30,18 @@ Project/
 │   ├── src/drone_rl/                      # shared project code for training and evaluation
 │   │   ├── __init__.py
 │   │   ├── hover_ppo.py
+│   │   ├── hover_ppo_vel.py
 │   │   ├── landing_ppo.py
 │   │   └── custom_envs/
 │   │       ├── __init__.py
 │   │       ├── project_base_aviary.py
 │   │       ├── project_rl_base_aviary.py
 │   │       ├── project_hover_aviary.py
+│   │       ├── project_hover_vel_aviary.py
 │   │       └── project_landing_aviary.py
 │   └── train/                             # training entrypoints
 │       ├── train_hover_ppo.py
+│       ├── train_hover_ppo_vel.py
 │       └── train_landing_ppo.py
 └── gym-pybullet-drones/ # sibling upstream repository (set up separately)
 ```
@@ -56,8 +60,12 @@ The repository now includes two single-agent PPO baselines based on the upstream
 Hover stage:
 
 - `src/drone_rl/hover_ppo.py`: shared PPO configuration, environment builders, training, and evaluation helpers
-- `train/train_hover_ppo.py`: trains a single-agent PPO hover policy
-- `eval/eval_hover_ppo.py`: evaluates a saved PPO hover model
+- `train/train_hover_ppo.py`: trains a single-agent PPO hover policy (default action mode: `one_d_rpm`)
+- `eval/eval_hover_ppo.py`: evaluates a saved PPO hover model trained with the default hover setup
+- `src/drone_rl/hover_ppo_vel.py`: shared PPO utilities for hover with explicit 3D velocity actions
+- `src/drone_rl/custom_envs/project_hover_vel_aviary.py`: hover environment variant where policy directly controls `[vx, vy, vz]` in `vel` mode
+- `train/train_hover_ppo_vel.py`: trains a single-agent PPO hover policy with explicit 3D velocity action mode `vel`
+- `eval/eval_hover_ppo_vel.py`: evaluates a saved PPO hover model trained with explicit 3D velocity action mode `vel`
 
 Landing stage:
 
@@ -86,6 +94,12 @@ From `RL_Project_drone/`, while that same conda environment is activated (`conda
 python train/train_hover_ppo.py
 ```
 
+Hover default control setup:
+
+- Action mode: `ActionType.ONE_D_RPM` (`one_d_rpm`)
+- PPO action: 1D normalized command in `[-1, 1]`
+- Control meaning: the single action value is mapped to the thrust command for all 4 motors equally
+
 Training arguments:
 
 - `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
@@ -108,6 +122,42 @@ Evaluation arguments:
 - `--gui`: run one normal-speed single-scenario PyBullet rollout and show the plots. Default: off
 
 Without `--gui`, evaluation runs only the fast metric check. With `--gui`, the script first runs the fast evaluation (using `--episodes`) and then shows one normal-speed single-scenario rollout with plots. If `best_model.zip` is not available, you can also evaluate `final_model.zip`.
+
+### Train Hover (VEL Action Mode)
+
+From `RL_Project_drone/`, while that same conda environment is activated (`conda activate drones`):
+
+```bash
+python train/train_hover_ppo_vel.py
+```
+
+Training arguments:
+
+- `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
+- `--eval-freq`: how often the callback pauses training to evaluate the current policy. Default: `2000`
+- `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `474.0`
+- `--seed`: random seed for reproducible training runs. Default: `0`
+- `--show-performance`: after training, open one real-time GUI rollout of the learned policy. Default: off
+- `--plot`: when used with `--show-performance`, display the logged state plots after the rollout finishes. Default: off
+
+Hover VEL control setup:
+
+- Action mode: `ActionType.VEL` (PID-backed velocity control)
+- PPO action: 3D normalized velocity command `[vx, vy, vz]` in `[-1, 1]`
+- No scheduled vertical command is injected; `vz` is learned by the policy
+- Hover reward/termination/truncation logic remains the same as the default hover task
+
+Evaluate a saved hover VEL model:
+
+```bash
+python eval/eval_hover_ppo_vel.py --model-path results/<run-folder>/best_model.zip
+```
+
+Evaluation arguments are the same as `eval/eval_hover_ppo.py`:
+
+- `--model-path`: path to the saved PPO model file, usually `best_model.zip` or `final_model.zip`. Required.
+- `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `10`
+- `--gui`: run one normal-speed single-scenario PyBullet rollout and show the plots. Default: off
 
 ### Train Landing
 
