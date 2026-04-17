@@ -17,6 +17,11 @@ from gym_pybullet_drones.utils.enums import ActionType, ObservationType
 class ProjectHoverVelAviary(ProjectHoverAviary):
     """Hover task with independent velocity commands on x, y, and z axes."""
 
+    def _computeReward(self):
+        """Computes hover reward for VEL mode using cubic distance shaping."""
+        state = self._getDroneStateVector(0)
+        return max(0, 2 - np.linalg.norm(self.TARGET_POS - state[0:3]) ** 3)
+
     def _actionSpace(self):
         """Returns action space.
 
