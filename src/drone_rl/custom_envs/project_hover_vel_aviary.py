@@ -18,9 +18,9 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     """Hover task with independent velocity commands on x, y, and z axes."""
 
     def _computeReward(self):
-        """Computes hover reward for VEL mode using cubic distance shaping."""
+        """Computes hover reward for VEL mode."""
         state = self._getDroneStateVector(0)
-        return max(0, 2 - np.linalg.norm(self.TARGET_POS - state[0:3]) ** 3)
+        return max(0, 2 - np.linalg.norm(self.TARGET_POS - state[0:3]) ** 4)
 
     def _actionSpace(self):
         """Returns action space.
