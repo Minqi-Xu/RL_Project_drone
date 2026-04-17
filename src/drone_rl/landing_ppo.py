@@ -25,8 +25,8 @@ class LandingPPOConfig:
 
     # Use the kinematic state vector (position, attitude, velocities, action history).
     observation: str = "kin"
-    # Use full RPM action so PPO controls all 4 motors independently.
-    action: str = "rpm"
+    # Use PID-guided velocity actions for landing.
+    action: str = "vel"
     seed: int = 0
     num_envs: int = 1
     total_timesteps: int = 1e7

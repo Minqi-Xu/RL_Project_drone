@@ -15,7 +15,7 @@ from gym_pybullet_drones.utils.enums import ActionType, DroneModel, ObservationT
 
 
 class ProjectLandingAviary(ProjectBaseRLAviary):
-    """Single-agent RL problem: descend and land near target using 4 motor actions."""
+    """Single-agent RL problem: descend and land near target using PID velocity actions."""
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         gui: bool = False,
         record: bool = False,
         obs: ObservationType = ObservationType.KIN,
-        act: ActionType = ActionType.RPM,
+        act: ActionType = ActionType.VEL,
     ):
         """Initialization of a single-agent RL environment for landing."""
         # Landing target at origin in world frame.
@@ -37,6 +37,10 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         # Episode and landing geometry.
         self.EPISODE_LEN_SEC = 8
         self.TOUCHDOWN_ALTITUDE_M = 0.05
+        self.Z_DESCENT_SPEED_HIGH_MPS = 0.50
+        self.Z_DESCENT_SPEED_LOW_MPS = 0.20
+        self.Z_DESCENT_ALT_HIGH_M = 0.50
+        self.Z_DESCENT_ALT_LOW_M = 0.20
 
         # Randomized starts around hover point near z=1.
         self.HOVER_START_POS = np.array([0.0, 0.0, 1.0])
@@ -50,17 +54,21 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
 
         # Reward shaping weights:
         # shaping_t = -wp*||dpos|| - wv*||vel|| - wa*(|roll|+|pitch|)
-        #             - ww*||ang_vel|| - wu*||action||.
+        #             - ww*||ang_vel|| - ws*||action_t-action_(t-1)|| - wacc*||acc||.
+        # Following the paper's "smooth actions with respect to time" idea, we
+        # penalize action variation instead of absolute action magnitude.
         self.W_POS = 2.0
         self.W_VEL = 0.8
         self.W_ATT = 0.5
         self.W_ANG_VEL = 0.05
-        self.W_ACTION = 0.05
+        self.W_ACTION_SMOOTH = 0.10
+        self.W_ACC = 0.02
 
         # Terminal rewards/penalties.
         self.SUCCESS_REWARD = 50.0
         self.FAILURE_PENALTY = -50.0
         self.previous_shaping = 0.0
+        self.previous_landing_state = np.zeros(11, dtype=np.float32)
 
         # Success / failure thresholds.
         self.SUCCESS_XY_ERR_M = 0.05
@@ -156,6 +164,7 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
 
         self._updateAndStoreKinematicInformation()
         landing_state = self._get_landing_state()
+        self.previous_landing_state = landing_state.copy()
         self.previous_shaping = self._compute_shaping(landing_state)
 
         return self._computeObs(), info
@@ -176,12 +185,87 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         """
         return np.array([self._get_landing_state()], dtype=np.float32)
 
+    def _actionSpace(self):
+        """Returns action space for landing.
+
+        In landing VEL mode, the policy commands only lateral velocity references
+        `[vx_ref, vy_ref]` in normalized range [-1, 1]. A constant downward z
+        reference is injected in `_preprocessAction()`.
+        """
+        if self.ACT_TYPE == ActionType.VEL:
+            size = 2
+            act_lower_bound = np.array([-1 * np.ones(size) for _ in range(self.NUM_DRONES)])
+            act_upper_bound = np.array([+1 * np.ones(size) for _ in range(self.NUM_DRONES)])
+            for _ in range(self.ACTION_BUFFER_SIZE):
+                self.action_buffer.append(np.zeros((self.NUM_DRONES, size)))
+            return spaces.Box(low=act_lower_bound, high=act_upper_bound, dtype=np.float32)
+        return super()._actionSpace()
+
+    def _preprocessAction(self, action):
+        """Pre-processes action into motor RPMs.
+
+        In landing VEL mode, action `[ax, ay]` commands lateral velocity while a
+        scheduled negative z velocity reference drives descent.
+        """
+        if self.ACT_TYPE != ActionType.VEL:
+            return super()._preprocessAction(action)
+
+        self.action_buffer.append(action)
+        rpm = np.zeros((self.NUM_DRONES, 4))
+        for k in range(action.shape[0]):
+            state = self._getDroneStateVector(k)
+            planar_cmd = np.clip(action[k, :], -1.0, 1.0)
+            planar_norm = np.linalg.norm(planar_cmd)
+            if planar_norm > 1.0:
+                planar_cmd = planar_cmd / planar_norm
+                planar_norm = 1.0
+            planar_unit = planar_cmd / planar_norm if planar_norm > 0 else np.zeros(2)
+            altitude = float(state[2] - self.TARGET_POS[2])
+            z_descent_speed = self._get_scheduled_descent_speed(altitude)
+            target_vel = np.array(
+                [
+                    self.SPEED_LIMIT * planar_norm * planar_unit[0],
+                    self.SPEED_LIMIT * planar_norm * planar_unit[1],
+                    -z_descent_speed,
+                ]
+            )
+            rpm_k, _, _ = self.ctrl[k].computeControl(
+                control_timestep=self.CTRL_TIMESTEP,
+                cur_pos=state[0:3],
+                cur_quat=state[3:7],
+                cur_vel=state[10:13],
+                cur_ang_vel=state[13:16],
+                target_pos=state[0:3],
+                target_rpy=np.array([0, 0, state[9]]),
+                target_vel=target_vel,
+            )
+            rpm[k, :] = rpm_k
+        return rpm
+
+    def _get_scheduled_descent_speed(self, altitude_m: float) -> float:
+        """Returns descent speed schedule as a function of altitude.
+
+        - altitude > 0.5 m: constant 0.5 m/s
+        - 0.2 m <= altitude <= 0.5 m: linearly decreases from 0.5 to 0.2 m/s
+        - altitude < 0.2 m: constant 0.2 m/s
+        """
+        if altitude_m > self.Z_DESCENT_ALT_HIGH_M:
+            return self.Z_DESCENT_SPEED_HIGH_MPS
+        if altitude_m < self.Z_DESCENT_ALT_LOW_M:
+            return self.Z_DESCENT_SPEED_LOW_MPS
+        span = self.Z_DESCENT_ALT_HIGH_M - self.Z_DESCENT_ALT_LOW_M
+        alpha = (altitude_m - self.Z_DESCENT_ALT_LOW_M) / span
+        return self.Z_DESCENT_SPEED_LOW_MPS + alpha * (
+            self.Z_DESCENT_SPEED_HIGH_MPS - self.Z_DESCENT_SPEED_LOW_MPS
+        )
+
     def _computeReward(self):
         """Computes r_t = shaping_t - shaping_(t-1) + r_success + r_fail."""
         landing_state = self._get_landing_state()
         shaping = self._compute_shaping(landing_state)
         reward = shaping - self.previous_shaping
         self.previous_shaping = shaping
+        self.previous_landing_state = landing_state.copy()
 
         if self._is_success(landing_state):
             reward += self.SUCCESS_REWARD
@@ -242,16 +326,23 @@ class ProjectLandingAviary(ProjectBaseRLAviary):
         """Computes paper-style shaping_t for landing."""
         dx, dy, dz, vx, vy, vz, roll, pitch, p_rate, q_rate, r_rate = landing_state
 
-        # Normalized 4-motor action from latest policy step.
+        # Penalize aggressive command changes over time (paper-inspired smooth-action term).
         latest_action = self.action_buffer[-1][0]
-        action_l2 = float(np.linalg.norm(latest_action))
+        prev_action = self.action_buffer[-2][0] if len(self.action_buffer) > 1 else np.zeros_like(latest_action)
+        action_delta_l2 = float(np.linalg.norm(latest_action - prev_action))
+
+        # Penalize aggressive physical motion using an acceleration proxy.
+        vel = np.array([vx, vy, vz], dtype=np.float32)
+        prev_vel = self.previous_landing_state[3:6]
+        acc_l2 = float(np.linalg.norm((vel - prev_vel) / self.CTRL_TIMESTEP))
 
         shaping = (
             -self.W_POS * np.sqrt(dx**2 + dy**2 + dz**2)
             -self.W_VEL * np.sqrt(vx**2 + vy**2 + vz**2)
             -self.W_ATT * (np.abs(roll) + np.abs(pitch))
             -self.W_ANG_VEL * np.sqrt(p_rate**2 + q_rate**2 + r_rate**2)
-            -self.W_ACTION * action_l2
+            -self.W_ACTION_SMOOTH * action_delta_l2
+            -self.W_ACC * acc_l2
         )
         return float(shaping)
 

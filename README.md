@@ -61,8 +61,8 @@ Hover stage:
 
 Landing stage:
 
-- `src/drone_rl/landing_ppo.py`: shared PPO configuration, environment builders, training, and evaluation helpers for landing
-- `src/drone_rl/custom_envs/project_landing_aviary.py`: landing environment with randomized starts near hover target `(0, 0, 1)`, including random roll/pitch/yaw and moderate random linear/angular velocity
+- `src/drone_rl/landing_ppo.py`: shared PPO configuration, environment builders, training, and evaluation helpers for landing (default action mode: `vel`)
+- `src/drone_rl/custom_envs/project_landing_aviary.py`: landing environment with randomized starts near hover target `(0, 0, 1)`, including random roll/pitch/yaw and moderate random linear/angular velocity; in `vel` mode, PPO controls only lateral velocity references while vertical descent speed is scheduled by altitude
 - `train/train_landing_ppo.py`: trains a single-agent PPO landing policy
 - `eval/eval_landing_ppo.py`: evaluates a saved PPO landing model
 
@@ -116,6 +116,16 @@ From `RL_Project_drone/`, while that same conda environment is activated (`conda
 ```bash
 python train/train_landing_ppo.py
 ```
+
+Landing control setup (current default):
+
+- Action mode: `ActionType.VEL` (PID-backed velocity control)
+- PPO action: 2D normalized lateral command `[ax, ay]` in `[-1, 1]`
+- Vertical command: not learned directly; descent speed is altitude-scheduled:
+  - altitude `> 0.5 m`: `0.5 m/s`
+  - altitude `0.2 m` to `0.5 m`: linearly decreases from `0.5` to `0.2 m/s`
+  - altitude `< 0.2 m`: `0.2 m/s`
+- Reward shaping includes position/velocity/attitude/angular-rate costs and anti-aggressive terms (`||a_t-a_{t-1}||` and acceleration proxy)
 
 Training arguments:
 
