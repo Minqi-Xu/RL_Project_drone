@@ -27,7 +27,6 @@ Project/
 │   │   ├── eval_landing_rpm_ppo.py
 │   │   ├── eval_travel_ppo.py
 │   │   └── plot_eval_rewards.py
-│   ├── models/                            # saved model checkpoints
 │   ├── results/                           # plots, logs, and generated artifacts
 │   ├── src/drone_rl/                      # shared project code for training and evaluation
 │   │   ├── __init__.py
