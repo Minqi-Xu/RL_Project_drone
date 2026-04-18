@@ -24,6 +24,7 @@ Project/
 │   │   ├── eval_hover_ppo.py
 │   │   ├── eval_hover_ppo_vel.py
 │   │   ├── eval_landing_ppo.py
+│   │   ├── eval_landing_rpm_ppo.py
 │   │   └── plot_eval_rewards.py
 │   ├── models/                            # saved model checkpoints
 │   ├── results/                           # plots, logs, and generated artifacts
@@ -38,7 +39,8 @@ Project/
 │   │       ├── project_rl_base_aviary.py
 │   │       ├── project_hover_aviary.py
 │   │       ├── project_hover_vel_aviary.py
-│   │       └── project_landing_aviary.py
+│   │       ├── project_landing_aviary.py
+│   │       └── project_landing_aviary_rpm_legacy.py
 │   └── train/                             # training entrypoints
 │       ├── train_hover_ppo.py
 │       ├── train_hover_ppo_vel.py
@@ -191,6 +193,14 @@ Evaluate a saved landing model:
 ```bash
 python eval/eval_landing_ppo.py --model-path results/<run-folder>/best_model.zip
 ```
+
+Evaluate a legacy landing model trained with 4-motor RPM actions (previous code version, no longer used for current training):
+
+```bash
+python eval/eval_landing_rpm_ppo.py --model-path results/<run-folder>/best_model.zip
+```
+
+Note: this legacy evaluation path is only for loading/evaluating historical models saved from the previous RPM-based landing method. It is not part of the current landing training setup.
 
 Evaluation arguments:
 
