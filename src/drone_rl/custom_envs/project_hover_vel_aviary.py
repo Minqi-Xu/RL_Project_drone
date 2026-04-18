@@ -17,14 +17,37 @@ from gym_pybullet_drones.utils.enums import ActionType, ObservationType
 class ProjectHoverVelAviary(ProjectHoverAviary):
     """Hover task with independent velocity commands on x, y, and z axes."""
 
+    ALPHA = 1.0
+    BETA = 1.0
+    BONUS = 0.25
+    LAMBDA_VEL = 0.1
+    CRASH_PENALTY = 600.0
+
+    def reset(self, seed: int | None = None, options: dict | None = None):
+        """Reset env and reinitialize action history buffer every episode."""
+        _obs, info = super().reset(seed=seed, options=options)
+        self._reset_action_buffer()
+        self.prev_error = self._get_position_error()
+        return self._computeObs(), info
+
     def _computeReward(self):
-        """Computes hover reward for VEL mode."""
+        """Computes hover reward for VEL mode with error-delta shaping."""
         state = self._getDroneStateVector(0)
-        reward = max(0, 2 - np.linalg.norm(self.TARGET_POS - state[0:3]) ** 2)
+        error = self._get_position_error()
+        prev_error = self.prev_error if hasattr(self, "prev_error") else error
+        vel_norm = float(np.linalg.norm(state[10:13]))
+
+        reward = (
+            self.ALPHA * (prev_error - error)
+            - self.BETA * (error**2)
+            + self.BONUS * float(error < 0.1)
+            - self.LAMBDA_VEL * (vel_norm**2) * float(error < 0.2)
+        )
+        self.prev_error = error
 
         # Add explicit terminal penalties for VEL-hover failure modes.
         if self._is_crash_state(state):
-            reward -= 600.0
+            reward -= self.CRASH_PENALTY
 
         return float(reward)
 
@@ -50,6 +73,21 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     def _is_timeout_state(self) -> bool:
         """Hard endpoint at episode length."""
         return bool(self.step_counter / self.PYB_FREQ > self.EPISODE_LEN_SEC)
+
+    def _get_position_error(self) -> float:
+        """Returns Euclidean distance to hover target."""
+        state = self._getDroneStateVector(0)
+        return float(np.linalg.norm(self.TARGET_POS - state[0:3]))
+
+    def _reset_action_buffer(self) -> None:
+        """Clears and refills action history with zeros for deterministic resets."""
+        if self.ACT_TYPE == ActionType.VEL:
+            action_dim = 3
+        else:
+            action_dim = int(self.action_space.shape[1])
+        self.action_buffer.clear()
+        for _ in range(self.ACTION_BUFFER_SIZE):
+            self.action_buffer.append(np.zeros((self.NUM_DRONES, action_dim), dtype=np.float32))
 
     def _actionSpace(self):
         """Returns action space.
