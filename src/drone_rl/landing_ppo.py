@@ -206,8 +206,6 @@ def show_model_performance(
     for step in range(max_rollout_steps):
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = test_env.step(action)
-        obs_data = obs.squeeze()
-        action_data = action.squeeze()
         print(
             "Obs:",
             obs,
@@ -221,11 +219,13 @@ def show_model_performance(
             truncated,
         )
 
-        if get_obs_type(config) == ObservationType.KIN and obs_data.shape[0] >= 15:
+        if get_obs_type(config) == ObservationType.KIN:
+            # Use the full simulator state (20D) for logger compatibility.
+            full_state = test_env._getDroneStateVector(0)
             logger.log(
                 drone=0,
                 timestamp=step / test_env.CTRL_FREQ,
-                state=np.hstack([obs_data[0:3], np.zeros(4), obs_data[3:15], action_data]),
+                state=full_state,
                 control=np.zeros(12),
             )
 
@@ -239,6 +239,9 @@ def show_model_performance(
     test_env_nogui.close()
 
     if plot and get_obs_type(config) == ObservationType.KIN:
-        logger.plot()
+        if np.max(logger.counters) > 0:
+            logger.plot()
+        else:
+            print("[WARNING] No rollout samples were logged, skipping logger.plot().")
 
     return mean_reward, std_reward

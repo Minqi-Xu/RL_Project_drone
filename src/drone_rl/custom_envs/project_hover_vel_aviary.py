@@ -34,8 +34,8 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
         return self._is_crash_state(state)
 
     def _computeTruncated(self):
-        """No truncation for hovering VEL."""
-        return False
+        """Truncate only at hard episode time limit."""
+        return self._is_timeout_state()
 
     def _is_crash_state(self, state: np.ndarray) -> bool:
         """Crash-like states aligned with hover RPM safety limits."""
@@ -46,6 +46,10 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
             or abs(state[7]) > 0.4
             or abs(state[8]) > 0.4
         )
+
+    def _is_timeout_state(self) -> bool:
+        """Hard endpoint at episode length."""
+        return bool(self.step_counter / self.PYB_FREQ > self.EPISODE_LEN_SEC)
 
     def _actionSpace(self):
         """Returns action space.
