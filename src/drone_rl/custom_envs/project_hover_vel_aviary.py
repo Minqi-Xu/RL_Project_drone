@@ -21,6 +21,7 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     BETA = 1.0
     BONUS = 0.25
     LAMBDA_VEL = 0.1
+    W_SMOOTH = 0.1
     CRASH_PENALTY = 600.0
 
     def reset(self, seed: int | None = None, options: dict | None = None):
@@ -42,6 +43,7 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
             - self.BETA * (error**2)
             + self.BONUS * float(error < 0.1)
             - self.LAMBDA_VEL * (vel_norm**2) * float(error < 0.2)
+            - self.W_SMOOTH * self._action_delta_l1()
         )
         self.prev_error = error
 
@@ -88,6 +90,14 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
         self.action_buffer.clear()
         for _ in range(self.ACTION_BUFFER_SIZE):
             self.action_buffer.append(np.zeros((self.NUM_DRONES, action_dim), dtype=np.float32))
+
+    def _action_delta_l1(self) -> float:
+        """Returns L1 action change ||a_t - a_{t-1}||_1 for smoothness penalty."""
+        if len(self.action_buffer) < 2:
+            return 0.0
+        a_t = self.action_buffer[-1][0]
+        a_prev = self.action_buffer[-2][0]
+        return float(np.sum(np.abs(a_t - a_prev)))
 
     def _actionSpace(self):
         """Returns action space.
