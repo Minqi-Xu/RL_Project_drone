@@ -25,6 +25,7 @@ Project/
 │   │   ├── eval_hover_ppo_vel.py
 │   │   ├── eval_landing_ppo.py
 │   │   ├── eval_landing_rpm_ppo.py
+│   │   ├── eval_travel_ppo.py
 │   │   └── plot_eval_rewards.py
 │   ├── models/                            # saved model checkpoints
 │   ├── results/                           # plots, logs, and generated artifacts
@@ -33,6 +34,7 @@ Project/
 │   │   ├── hover_ppo.py
 │   │   ├── hover_ppo_vel.py
 │   │   ├── landing_ppo.py
+│   │   ├── travel_ppo.py
 │   │   └── custom_envs/
 │   │       ├── __init__.py
 │   │       ├── project_base_aviary.py
@@ -40,11 +42,13 @@ Project/
 │   │       ├── project_hover_aviary.py
 │   │       ├── project_hover_vel_aviary.py
 │   │       ├── project_landing_aviary.py
+│   │       ├── project_travel_aviary.py
 │   │       └── project_landing_aviary_rpm_legacy.py
 │   └── train/                             # training entrypoints
 │       ├── train_hover_ppo.py
 │       ├── train_hover_ppo_vel.py
-│       └── train_landing_ppo.py
+│       ├── train_landing_ppo.py
+│       └── train_travel_ppo.py
 └── gym-pybullet-drones/ # sibling upstream repository (set up separately)
 ```
 
@@ -54,6 +58,7 @@ Current milestones are:
 
 1. Train and evaluate a PPO agent that can take off and maintain stable hover near a target position.
 2. Train and evaluate a separate PPO agent that starts near the hover target in an imbalanced state and performs safe landing.
+3. Train and evaluate a separate PPO agent that travels from near `(0, 0, 1)` to `(4, 4, 1)` under PID-backed velocity control.
 
 ## Current Baselines
 
@@ -75,6 +80,13 @@ Landing stage:
 - `src/drone_rl/custom_envs/project_landing_aviary.py`: landing environment with randomized starts near hover target `(0, 0, 1)`, including random roll/pitch/yaw and moderate random linear/angular velocity; in `vel` mode, PPO controls only lateral velocity references while vertical descent speed is scheduled by altitude
 - `train/train_landing_ppo.py`: trains a single-agent PPO landing policy
 - `eval/eval_landing_ppo.py`: evaluates a saved PPO landing model
+
+Travel stage:
+
+- `src/drone_rl/travel_ppo.py`: shared PPO configuration, environment builders, training, and evaluation helpers for traveling (default action mode: `vel`)
+- `src/drone_rl/custom_envs/project_travel_aviary.py`: travel environment with randomized starts near `(0, 0, 1)`, target at `(4, 4, 1)`, and VEL PID control where PPO outputs normalized `[vx, vy, vz]`; observation state is `[dx, dy, dz, p, q, r, roll, pitch, yaw]`
+- `train/train_travel_ppo.py`: trains a single-agent PPO travel policy
+- `eval/eval_travel_ppo.py`: evaluates a saved PPO travel model
 
 Training outputs are written to timestamped folders under `results/`.
 
@@ -201,6 +213,46 @@ python eval/eval_landing_rpm_ppo.py --model-path results/<run-folder>/best_model
 ```
 
 Note: this legacy evaluation path is only for loading/evaluating historical models saved from the previous RPM-based landing method. It is not part of the current landing training setup.
+
+Evaluation arguments:
+
+- `--model-path`: path to the saved PPO model file, usually `best_model.zip` or `final_model.zip`. Required.
+- `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `50`
+- `--gui`: run one normal-speed single-scenario PyBullet rollout and show the plots. Default: off
+
+Without `--gui`, evaluation runs only the fast metric check. With `--gui`, the script first runs the fast evaluation (using `--episodes`) and then shows one normal-speed single-scenario rollout with plots. If `best_model.zip` is not available, you can also evaluate `final_model.zip`.
+
+### Train Travel
+
+From `RL_Project_drone/`, while that same conda environment is activated (`conda activate drones`):
+
+```bash
+python train/train_travel_ppo.py
+```
+
+Travel control setup (current default):
+
+- Action mode: `ActionType.VEL` (PID-backed velocity control)
+- PPO action: 3D normalized velocity command `[vx, vy, vz]` in `[-1, 1]`
+- Start condition: random initial position near `(0, 0, 1)` with randomized linear velocity, angular velocity, roll, pitch, and yaw
+- Target: fixed point `(4, 4, 1)`
+- Observation state: `[dx, dy, dz, p, q, r, roll, pitch, yaw]` where `d*` is position error to target
+- GUI visualization: a persistent reference line is drawn from `(0, 0, 1)` to `(4, 4, 1)`
+
+Training arguments:
+
+- `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
+- `--eval-freq`: how often the callback pauses training to evaluate the current policy. Default: `2000`
+- `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `45.0`
+- `--seed`: random seed for reproducible training runs. Default: `0`
+- `--show-performance`: after training, open one real-time GUI rollout of the learned policy. Default: off
+- `--plot`: when used with `--show-performance`, display the logged state plots after the rollout finishes. Default: off
+
+Evaluate a saved travel model:
+
+```bash
+python eval/eval_travel_ppo.py --model-path results/<run-folder>/best_model.zip
+```
 
 Evaluation arguments:
 
