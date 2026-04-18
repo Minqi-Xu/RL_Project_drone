@@ -20,7 +20,32 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     def _computeReward(self):
         """Computes hover reward for VEL mode."""
         state = self._getDroneStateVector(0)
-        return max(0, 2 - np.linalg.norm(self.TARGET_POS - state[0:3]) ** 4)
+        reward = max(0, 2 - np.linalg.norm(self.TARGET_POS - state[0:3]) ** 2)
+
+        # Add explicit terminal penalties for VEL-hover failure modes.
+        if self._is_crash_state(state):
+            reward -= 600.0
+
+        return float(reward)
+
+    def _computeTerminated(self):
+        """Terminate only on crash-like states for VEL hovering."""
+        state = self._getDroneStateVector(0)
+        return self._is_crash_state(state)
+
+    def _computeTruncated(self):
+        """No truncation for hovering VEL."""
+        return False
+
+    def _is_crash_state(self, state: np.ndarray) -> bool:
+        """Crash-like states aligned with hover RPM safety limits."""
+        return bool(
+            abs(state[0]) > 1.5
+            or abs(state[1]) > 1.5
+            or state[2] > 2.0
+            or abs(state[7]) > 0.4
+            or abs(state[8]) > 0.4
+        )
 
     def _actionSpace(self):
         """Returns action space.
@@ -40,14 +65,15 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     def _observationSpace(self):
         """Returns observation space.
 
-        For VEL mode, append 3 action-history values per buffer slot instead of 4.
+        For VEL mode, state uses delta position [dx, dy, dz] and appends
+        3 action-history values per buffer slot instead of 4.
         """
         if self.OBS_TYPE != ObservationType.KIN or self.ACT_TYPE != ActionType.VEL:
             return super()._observationSpace()
 
         lo = -np.inf
         hi = np.inf
-        obs_lower_bound = np.array([[lo, lo, 0, lo, lo, lo, lo, lo, lo, lo, lo, lo] for _ in range(self.NUM_DRONES)])
+        obs_lower_bound = np.array([[lo, lo, lo, lo, lo, lo, lo, lo, lo, lo, lo, lo] for _ in range(self.NUM_DRONES)])
         obs_upper_bound = np.array([[hi, hi, hi, hi, hi, hi, hi, hi, hi, hi, hi, hi] for _ in range(self.NUM_DRONES)])
 
         act_lo = -1
@@ -62,14 +88,19 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
         return spaces.Box(low=obs_lower_bound, high=obs_upper_bound, dtype=np.float32)
 
     def _computeObs(self):
-        """Returns current observation."""
+        """Returns current observation.
+
+        KIN state layout:
+        [dx, dy, dz, roll, pitch, yaw, vx, vy, vz, wx, wy, wz] + action history.
+        """
         if self.OBS_TYPE != ObservationType.KIN or self.ACT_TYPE != ActionType.VEL:
             return super()._computeObs()
 
         obs_12 = np.zeros((self.NUM_DRONES, 12))
         for i in range(self.NUM_DRONES):
             obs = self._getDroneStateVector(i)
-            obs_12[i, :] = np.hstack([obs[0:3], obs[7:10], obs[10:13], obs[13:16]]).reshape(12,)
+            delta_pos = obs[0:3] - self.TARGET_POS
+            obs_12[i, :] = np.hstack([delta_pos, obs[7:10], obs[10:13], obs[13:16]]).reshape(12,)
 
         ret = np.array([obs_12[i, :] for i in range(self.NUM_DRONES)]).astype("float32")
         for i in range(self.ACTION_BUFFER_SIZE):
