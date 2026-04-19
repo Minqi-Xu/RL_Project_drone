@@ -21,8 +21,8 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     BETA = 1.0
     BONUS = 0.25
     W_SMOOTH = 0.1
-    W_ALT_EXCESS = 0.02
-    ALT_ERR_THRESHOLD = 0.1
+    W_TILT_EXCESS = 0.01
+    TILT_ERR_THRESHOLD = 0.1
     CRASH_PENALTY = 600.0
 
     def reset(self, seed: int | None = None, options: dict | None = None):
@@ -37,15 +37,17 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
         state = self._getDroneStateVector(0)
         error = self._get_position_error()
         prev_error = self.prev_error if hasattr(self, "prev_error") else error
-        alt_err_abs = abs(float(state[2] - self.TARGET_POS[2]))
-        alt_err_excess = max(0.0, alt_err_abs - self.ALT_ERR_THRESHOLD)
+        roll_abs = abs(float(state[7]))
+        pitch_abs = abs(float(state[8]))
+        roll_excess = max(0.0, roll_abs - self.TILT_ERR_THRESHOLD)
+        pitch_excess = max(0.0, pitch_abs - self.TILT_ERR_THRESHOLD)
 
         reward = (
             self.ALPHA * (prev_error - error)
             - self.BETA * (error**2)
             + self.BONUS * float(error < 0.1)
             - self.W_SMOOTH * self._action_delta_l1()
-            - self.W_ALT_EXCESS * alt_err_excess
+            - self.W_TILT_EXCESS * (roll_excess + pitch_excess)
         )
         self.prev_error = error
 
