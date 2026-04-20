@@ -1,8 +1,8 @@
 """Project-local hover aviary variant with explicit 3D VEL actions.
 
-This environment keeps hover reward/termination/truncation identical to
-`ProjectHoverAviary`, but changes VEL action semantics so the policy directly
-commands `[vx, vy, vz]` (all learned), without any scheduled z-velocity.
+This environment changes the hover reward and episode-end logic from
+`ProjectHoverAviary` and lets the policy directly command `[vx, vy, vz]`
+(all learned) without any scheduled z-velocity.
 """
 
 from __future__ import annotations
