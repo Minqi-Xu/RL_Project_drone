@@ -89,6 +89,14 @@ Travel stage:
 
 Training outputs are written to timestamped folders under `results/`.
 
+## Future Steps
+
+Planned next steps for the project are:
+
+1. Finish the travel agent so point-to-point flight becomes reliable enough for later integration.
+2. Add obstacle avoidance functionality on top of the travel capability.
+3. Tune the hover reward function further so hovering becomes more stable and smooth.
+
 ## How To Run
 
 ### Prerequisite: set up `utiasDSL/gym-pybullet-drones` first
