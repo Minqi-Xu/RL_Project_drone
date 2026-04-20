@@ -48,16 +48,18 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
         self.TRAVEL_SPEED_SCALE = 4.0
 
         # Reward shaping weights.
-        self.W_POS = 2.5
-        self.W_VEL = 0.4
+        self.W_POS = 5.0
         self.W_ATT = 0.3
-        self.W_ALT = 0.2
+        self.W_ALT = 0.5
         self.W_ANG_VEL = 0.05
         self.W_ACTION_SMOOTH = 0.08
+        self.W_OVERSPEED = 1.0
+        self.SAFE_SPEED_MPS = 1.0
+        self.TIME_PENALTY = 0.02
 
         # Terminal rewards/penalties.
-        self.SUCCESS_REWARD = 50.0
-        self.FAILURE_PENALTY = -50.0
+        self.SUCCESS_REWARD = 2000.0
+        self.FAILURE_PENALTY = -2000.0
         self.previous_shaping = 0.0
         self.previous_travel_state = np.zeros(9, dtype=np.float32)
 
@@ -73,6 +75,12 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
         self.BOUND_MIN_Z_M = 0.0
         self.BOUND_MAX_Z_M = 3.0
 
+        # Travel-specific GUI camera framing so the entire path is visible.
+        self.CAMERA_TARGET = np.array([2.0, 2.0, 1.0], dtype=np.float32)
+        self.CAMERA_DISTANCE = 5.5
+        self.CAMERA_YAW_DEG = 45.0
+        self.CAMERA_PITCH_DEG = -32.0
+
         super().__init__(
             drone_model=drone_model,
             num_drones=1,
@@ -87,6 +95,7 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
             act=act,
         )
 
+        self._set_travel_camera_view()
         self._draw_reference_line()
 
     def reset(self, seed: int | None = None, options: dict | None = None):
@@ -140,6 +149,7 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
         travel_state = self._get_travel_state()
         self.previous_travel_state = travel_state.copy()
         self.previous_shaping = self._compute_shaping(travel_state)
+        self._set_travel_camera_view()
         self._draw_reference_line()
         return self._computeObs(), info
 
@@ -198,10 +208,10 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
         return rpm
 
     def _computeReward(self):
-        """Computes r_t = shaping_t - shaping_(t-1) + r_success + r_fail."""
+        """Computes r_t = shaping_t - shaping_(t-1) - time_penalty + terminal reward."""
         travel_state = self._get_travel_state()
         shaping = self._compute_shaping(travel_state)
-        reward = shaping - self.previous_shaping
+        reward = shaping - self.previous_shaping - self.TIME_PENALTY
         self.previous_shaping = shaping
         self.previous_travel_state = travel_state.copy()
 
@@ -259,6 +269,7 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
         dx, dy, dz, p_rate, q_rate, r_rate, roll, pitch, _yaw = travel_state
         state = self._getDroneStateVector(0)
         speed = float(np.linalg.norm(state[10:13]))
+        overspeed = max(0.0, speed - self.SAFE_SPEED_MPS)
 
         latest_action = self.action_buffer[-1][0]
         prev_action = self.action_buffer[-2][0] if len(self.action_buffer) > 1 else np.zeros_like(latest_action)
@@ -267,9 +278,9 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
         shaping = (
             -self.W_POS * np.sqrt(dx**2 + dy**2 + dz**2)
             -self.W_ALT * np.abs(dz)
-            -self.W_VEL * speed
             -self.W_ATT * (np.abs(roll) + np.abs(pitch))
             -self.W_ANG_VEL * np.sqrt(p_rate**2 + q_rate**2 + r_rate**2)
+            -self.W_OVERSPEED * (overspeed**2)
             -self.W_ACTION_SMOOTH * action_delta_l2
         )
         return float(shaping)
@@ -314,5 +325,17 @@ class ProjectTravelAviary(ProjectBaseRLAviary):
             lineColorRGB=[0.1, 0.9, 0.1],
             lineWidth=3.0,
             lifeTime=0,
+            physicsClientId=self.CLIENT,
+        )
+
+    def _set_travel_camera_view(self) -> None:
+        """Sets a travel-only GUI camera view covering the full route."""
+        if not self.GUI:
+            return
+        p.resetDebugVisualizerCamera(
+            cameraDistance=self.CAMERA_DISTANCE,
+            cameraYaw=self.CAMERA_YAW_DEG,
+            cameraPitch=self.CAMERA_PITCH_DEG,
+            cameraTargetPosition=self.CAMERA_TARGET.tolist(),
             physicsClientId=self.CLIENT,
         )

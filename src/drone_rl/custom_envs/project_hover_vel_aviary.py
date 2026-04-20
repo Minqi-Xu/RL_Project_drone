@@ -20,9 +20,7 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
     ALPHA = 1.0
     BETA = 1.0
     BONUS = 0.25
-    W_SMOOTH = 0.1
-    W_TILT_EXCESS = 0.01
-    TILT_ERR_THRESHOLD = 0.1
+    LAMBDA_VEL = 0.1
     CRASH_PENALTY = 600.0
 
     def reset(self, seed: int | None = None, options: dict | None = None):
@@ -37,17 +35,14 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
         state = self._getDroneStateVector(0)
         error = self._get_position_error()
         prev_error = self.prev_error if hasattr(self, "prev_error") else error
-        roll_abs = abs(float(state[7]))
-        pitch_abs = abs(float(state[8]))
-        roll_excess = max(0.0, roll_abs - self.TILT_ERR_THRESHOLD)
-        pitch_excess = max(0.0, pitch_abs - self.TILT_ERR_THRESHOLD)
+        vel_norm = float(np.linalg.norm(state[10:13]))
 
         reward = (
             self.ALPHA * (prev_error - error)
             - self.BETA * (error**2)
-            + self.BONUS * float(error < 0.1)
-            - self.W_SMOOTH * self._action_delta_l1()
-            - self.W_TILT_EXCESS * (roll_excess + pitch_excess)
+            + self.BONUS * float(error < 0.15)
+            + (self.BONUS / 2) * float(error < 0.08)
+            - self.LAMBDA_VEL * (vel_norm**2) * float(error < 0.2)
         )
         self.prev_error = error
 
@@ -94,14 +89,6 @@ class ProjectHoverVelAviary(ProjectHoverAviary):
         self.action_buffer.clear()
         for _ in range(self.ACTION_BUFFER_SIZE):
             self.action_buffer.append(np.zeros((self.NUM_DRONES, action_dim), dtype=np.float32))
-
-    def _action_delta_l1(self) -> float:
-        """Returns L1 action change ||a_t - a_{t-1}||_1 for smoothness penalty."""
-        if len(self.action_buffer) < 2:
-            return 0.0
-        a_t = self.action_buffer[-1][0]
-        a_prev = self.action_buffer[-2][0]
-        return float(np.sum(np.abs(a_t - a_prev)))
 
     def _actionSpace(self):
         """Returns action space.

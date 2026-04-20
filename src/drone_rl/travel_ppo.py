@@ -102,6 +102,7 @@ def build_eval_callback(eval_env, run_dir: Path, config: TravelPPOConfig) -> Eva
         best_model_save_path=str(run_dir),
         log_path=str(run_dir),
         eval_freq=config.eval_freq,
+        n_eval_episodes=config.n_eval_episodes,
         deterministic=config.deterministic_eval,
         render=False,
     )

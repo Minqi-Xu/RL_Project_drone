@@ -61,7 +61,7 @@ Current milestones are:
 
 ## Current Baselines
 
-The repository now includes two single-agent PPO baselines based on the upstream `gym_pybullet_drones/examples/learn.py` example style.
+The repository now includes multiple single-agent PPO baselines based on the upstream `gym_pybullet_drones/examples/learn.py` example style.
 
 Hover stage:
 
@@ -146,7 +146,7 @@ python train/train_hover_ppo_vel.py
 
 Training arguments:
 
-- `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
+- `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `1000000`
 - `--eval-freq`: how often the callback pauses training to evaluate the current policy. Default: `2000`
 - `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `474.0`
 - `--seed`: random seed for reproducible training runs. Default: `0`
@@ -158,7 +158,10 @@ Hover VEL control setup:
 - Action mode: `ActionType.VEL` (PID-backed velocity control)
 - PPO action: 3D normalized velocity command `[vx, vy, vz]` in `[-1, 1]`
 - No scheduled vertical command is injected; `vz` is learned by the policy
-- Hover reward/termination/truncation logic remains the same as the default hover task
+- Observation state: `[dx, dy, dz, roll, pitch, yaw, vx, vy, vz, wx, wy, wz]` plus action-history buffer (buffer is reset each episode)
+- Reward (current): `alpha*(e_(t-1)-e_t) - beta*e_t^2 + b*1(e_t<0.1) - w_smooth*||a_t-a_(t-1)||_1 - w_tilt*(roll_excess + pitch_excess) - crash_penalty`
+- Current weights: `alpha=1.0`, `beta=2.0`, `b=0.5`, `w_smooth=0.2`, `w_tilt=0.1`, `tilt_threshold=0.1`, `crash_penalty=600`
+- Termination/truncation: `terminated=True` on crash-like states (`|x|>1.5`, `|y|>1.5`, `z>2.0`, `|roll|>0.4`, or `|pitch|>0.4`), `truncated=True` only at hard episode time limit (`8s`)
 
 Evaluate a saved hover VEL model:
 
@@ -166,11 +169,13 @@ Evaluate a saved hover VEL model:
 python eval/eval_hover_ppo_vel.py --model-path results/<run-folder>/best_model.zip
 ```
 
-Evaluation arguments are the same as `eval/eval_hover_ppo.py`:
+Evaluation arguments:
 
 - `--model-path`: path to the saved PPO model file, usually `best_model.zip` or `final_model.zip`. Required.
-- `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `10`
+- `--episodes`: number of fast evaluation episodes used to compute mean and standard deviation reward. Default: `25`
 - `--gui`: run one normal-speed single-scenario PyBullet rollout and show the plots. Default: off
+
+Training callback evaluation for hover VEL also uses `25` episodes per evaluation checkpoint.
 
 ### Train Landing
 
@@ -242,6 +247,7 @@ Training arguments:
 
 - `--total-timesteps`: total number of environment steps PPO will train for before stopping, unless early stopping happens first. Default: `10000000`
 - `--eval-freq`: how often the callback pauses training to evaluate the current policy. Default: `2000`
+- callback evaluation episodes: each callback evaluation runs `50` episodes (`n_eval_episodes=50` in travel PPO config)
 - `--reward-threshold`: target evaluation reward used for early stopping when the policy is good enough. Default: `45.0`
 - `--seed`: random seed for reproducible training runs. Default: `0`
 - `--show-performance`: after training, open one real-time GUI rollout of the learned policy. Default: off
